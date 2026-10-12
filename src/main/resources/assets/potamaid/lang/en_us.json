@@ -1,0 +1,13 @@
+{
+  "itemGroup.potamaid": "Example Mod Tab",
+  "block.potamaid.example_block": "Example Block",
+  "item.potamaid.example_item": "Example Item",
+
+  "potamaid.configuration.title": "Example Mod Configs",
+  "potamaid.configuration.section.potamaid.common.toml": "Example Mod Configs",
+  "potamaid.configuration.section.potamaid.common.toml.title": "Example Mod Configs",
+  "potamaid.configuration.items": "Item List",
+  "potamaid.configuration.logDirtBlock": "Log Dirt Block",
+  "potamaid.configuration.magicNumberIntroduction": "Magic Number Text",
+  "potamaid.configuration.magicNumber": "Magic Number"
+}
