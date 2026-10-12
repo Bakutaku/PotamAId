@@ -1,0 +1,39 @@
+name: PR Title
+
+# Squash merge では PR タイトルが main のコミットメッセージになり、
+# release-please がそれを読んでバージョンと CHANGELOG を決めるため、形式をチェックする
+on:
+  pull_request:
+    # edited: タイトルを直したときに再チェックする
+    # synchronize: push のたびに新しいコミットにチェック結果を付ける（必須チェックはコミットごとに判定されるため）
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      # タイトルは env 経由で渡す（run に直接埋め込むと、タイトルの内容がシェルとして解釈されるため）
+      - name: Check PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([^)]+\))?!?: [^ ]'
+          if ! printf '%s\n' "$TITLE" | grep -Eq "$pattern"; then
+            echo "::error::PR タイトルが Conventional Commits の形式ではありません: $TITLE"
+            echo "形式: <type>: <説明>（例: feat: 川の近くに生成される鉱石ブロックを追加）"
+            echo "詳細: docs/commit-convention.md"
+            exit 1
+          fi
+          case "$TITLE" in
+            *。)
+              echo "::error::PR タイトルの末尾に句点（。）を付けないでください: $TITLE"
+              exit 1
+              ;;
+          esac
+          echo "OK: $TITLE"

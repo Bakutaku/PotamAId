@@ -30,6 +30,12 @@ Minecraft 1.21.1 / NeoForge 向けの Mod です。
 IntelliJ IDEA でこのフォルダを開くと、Gradle プロジェクトとして自動で読み込まれます。
 読み込み時に Minecraft と NeoForge が自動でダウンロードされます。
 
+クローンしたら、main への誤コミットを防ぐ Git フックを有効にしてください（[詳細](docs/development-flow.md#main-への誤コミット防止)）。
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ### よく使うコマンド
 
 ```bash
