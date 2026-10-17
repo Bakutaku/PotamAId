@@ -1,0 +1,13 @@
+#!/bin/sh
+# main ブランチへの直接コミットを防ぐ。
+# 有効にするには、クローンしたリポジトリで一度だけ次のコマンドを実行する。
+#   git config core.hooksPath .githooks
+
+branch=$(git symbolic-ref --short -q HEAD)
+
+if [ "$branch" = "main" ]; then
+  echo "エラー: main ブランチには直接コミットできません。" >&2
+  echo "作業ブランチ（<type>/<内容>）を作成してからコミットしてください。" >&2
+  echo "  例: git switch -c feat/river-spawn" >&2
+  exit 1
+fi

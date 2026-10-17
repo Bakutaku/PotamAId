@@ -23,11 +23,22 @@ main に Squash merge
   - 例: `feat/river-spawn`, `fix/config-loading`, `docs/readme-install`
 - 作業が終わってマージした作業ブランチは削除します。
 
+### main への誤コミット防止
+
+GitHub 側では [Rules](github-settings.md#rules) で main への直接 push を禁止していますが、手元での `git commit` は止められません。
+そのため、main でのコミットを止める pre-commit フックを `.githooks/` に用意しています。クローンしたら一度だけ次のコマンドを実行して有効にしてください。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+有効にすると、main で `git commit` を実行したときにエラーになります。作業ブランチを作成してからコミットしてください。
+
 ## PR
 
-1. 作業ブランチを push して、`main` に向けた PR を作成します。
+1. 作業ブランチを push して、`main` に向けた PR を作成します。本文にはテンプレートが入るので、概要と動作確認を書き、チェックリストを確認します。
 2. **PR タイトルを [コミットメッセージ規約](commit-convention.md) の形式にします。** Squash merge 後、これが main のコミットメッセージになります。
-3. CI（Build ワークフロー）が成功していることを確認します。
+3. CI（Build ワークフローと PR Title ワークフロー）が成功していることを確認します。
    CI でビルドした jar は、Actions の実行結果ページの「Artifacts」からダウンロードできます（保存期間 7 日）。
 4. **Squash and merge** でマージします。
 
@@ -43,6 +54,16 @@ main に Squash merge
   1. `vX.Y.Z` のタグを作成
   2. GitHub Release を作成（本文は CHANGELOG の内容）
   3. Mod の jar をビルドして Release に添付
+
+### リリース PR では CI が動かない
+
+GitHub の仕様により、`GITHUB_TOKEN` で作成された PR（release-please のリリース PR）では、Build ワークフローと PR Title ワークフローが実行されません。
+そのため、必須チェックが「Waiting for status to be reported」のままになり、通常の方法ではマージできません。
+
+リリース PR の変更は `mod_version` と `CHANGELOG.md` だけで、jar はマージ後に Release Please ワークフローでビルドされるため、CI を省略してマージして構いません。
+マージ画面で **「Merge without waiting for requirements to be met (bypass rules)」にチェックを入れて** マージしてください（Rules の Bypass list に入っている管理者のみ可能です）。
+
+CI を動かしてからマージしたい場合は、リリース PR をいったん閉じて、もう一度開いてください。人の操作として扱われるため CI が実行されます。ただし、release-please がリリース PR を更新するたびに同じ操作が必要です。
 
 ### 手動で変更してはいけないもの
 
@@ -82,20 +103,6 @@ GitHub Release の作成後に jar のビルドや添付が失敗した場合は
 - **失敗したジョブだけを再実行する**: Actions の実行結果ページで「Re-run failed jobs」を選びます。`upload-jar` ジョブだけが再実行されます（「Re-run all jobs」ではリリースが作成済みと判定されず、jar の添付がスキップされます）。
 - **タグを指定して手動実行する**: Actions → Release Please → 「Run workflow」で、`tag` に対象のリリースタグ（例: `v0.1.0`）を入力して実行します。そのタグのコミットから jar をビルドし、対応する GitHub Release に添付します。同名の jar が添付済みの場合は上書きします。
 
-## GitHub リポジトリの初期設定
+## GitHub リポジトリの設定
 
-リポジトリを GitHub に作成したら、以下を設定してください。
-
-- **Settings → Actions → General → Workflow permissions**
-  - 「Allow GitHub Actions to create and approve pull requests」にチェックを入れる（release-please がリリース PR を作るために必要）
-- **Settings → General → Pull Requests**
-  - 「Allow squash merging」のみ有効にする
-  - Default commit message を「Pull request title」にする
-  - 「Automatically delete head branches」を有効にする
-- **Settings → Rules（Public リポジトリ、または有料プランの場合）**
-  - `main` への直接 push を禁止し、PR と Build ワークフローの成功を必須にする
-
-### 注意: リリース PR では CI が動かない
-
-GitHub の仕様により、`GITHUB_TOKEN` で作成された PR（release-please のリリース PR）では、Build ワークフローが自動で実行されません。
-リリース PR の変更はバージョン番号と CHANGELOG だけなので通常は問題ありませんが、main を Rules で保護して「CI の成功」を必須にしている場合は、リリース PR がマージできなくなります。その場合は、ルールの設定を調整するか、release-please に Personal Access Token や GitHub App のトークンを渡す設定に変更してください。
+Actions の権限・マージ方法・Rules などの GitHub 側の設定は、[GitHub リポジトリの設定](github-settings.md) にまとめています。

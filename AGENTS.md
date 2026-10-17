@@ -32,7 +32,7 @@
 | `src/main/templates/` | ビルド時に `gradle.properties` の値で `${}` が置換されるテンプレート（`neoforge.mods.toml` など） |
 | `src/generated/resources/` | データ生成（`runData`）の出力先。**手動で編集しない** |
 | `docs/` | 開発ルールなどのドキュメント |
-| `.github/workflows/` | CI（`build.yml`）とリリース自動化（`release-please.yml`） |
+| `.github/workflows/` | CI（`build.yml`、`pr-title.yml`）とリリース自動化（`release-please.yml`） |
 | `run/` | 開発用クライアント・サーバーの実行ディレクトリ（git 管理外） |
 
 ## よく使うコマンド
@@ -73,7 +73,7 @@ Windows の PowerShell / コマンドプロンプトでは `gradlew.bat` を使�
 
 ## 作業の進め方
 
-- 作業が終わったら `./gradlew build` を実行し、成功することを確認してから報告する。失敗した場合は、そのことを結果とともに報告する。
+- コードを変更した場合、作業が完了したら `./gradlew build` を実行し、成功することを確認してから報告する。失敗した場合は、そのことを結果とともに報告する。
 - 依存関係（Gradle プラグイン、NeoForge、ライブラリ）や GitHub Actions のバージョンを上げる場合は、ユーザーに確認してから行う。
 - 作業内容の報告やドキュメントは日本語で書く。
 

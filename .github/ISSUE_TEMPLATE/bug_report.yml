@@ -1,0 +1,96 @@
+name: バグ報告
+description: 不具合やクラッシュを報告する
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。原因を調べるため、できるだけ詳しく書いてください。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 内容
+      description: 何が起きたかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 不具合が起きるまでの操作を順番に書いてください。
+      placeholder: |
+        1. ワールドを作成する
+        2. 〇〇を設置する
+        3. 〇〇を右クリックする
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+      description: 本来どうなるべきだと思うかを書いてください。
+    validations:
+      required: false
+
+  - type: input
+    id: mod-version
+    attributes:
+      label: PotamAId のバージョン
+      placeholder: "例: 0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: minecraft-version
+    attributes:
+      label: Minecraft のバージョン
+      placeholder: "例: 1.21.1"
+    validations:
+      required: true
+
+  - type: input
+    id: neoforge-version
+    attributes:
+      label: NeoForge のバージョン
+      placeholder: "例: 21.1.259"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: プレイ環境
+      options:
+        - シングルプレイ
+        - マルチプレイ（専用サーバー）
+        - マルチプレイ（LAN）
+    validations:
+      required: true
+
+  - type: textarea
+    id: other-mods
+    attributes:
+      label: 一緒に導入している Mod
+      description: 他の Mod との組み合わせで起きる不具合もあるため、分かる範囲で書いてください。
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ・クラッシュレポート
+      description: |
+        クラッシュした場合は `crash-reports/` フォルダ内のファイルを、それ以外の場合は `logs/latest.log` を添付してください（この欄にファイルをドラッグ＆ドロップできます）。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 確認事項
+      options:
+        - label: 既存の Issue に同じ報告がないことを確認した
+          required: true
