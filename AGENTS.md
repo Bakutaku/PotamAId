@@ -4,6 +4,8 @@
 
 バージョンなどの値は `gradle.properties` で一元管理しています。値を確認するときはこのファイルを参照してください。
 
+機能の仕様は [docs/specification.md](docs/specification.md) にまとめています。機能を実装する前に読んでください。仕様の「未決定・要調査」の項目は、勝手に決めずにユーザーに確認してください。
+
 ## 必ず守るルール
 
 以下の規約は `docs/` にあります。該当する作業の前に必ず読んで従ってください。
@@ -31,7 +33,7 @@
 | `src/main/resources/data/potamaid/` | レシピ・ルートテーブル・タグなどのデータ |
 | `src/main/templates/` | ビルド時に `gradle.properties` の値で `${}` が置換されるテンプレート（`neoforge.mods.toml` など） |
 | `src/generated/resources/` | データ生成（`runData`）の出力先。**手動で編集しない** |
-| `docs/` | 開発ルールなどのドキュメント |
+| `docs/` | 開発ルール・機能仕様などのドキュメント |
 | `.github/workflows/` | CI（`build.yml`、`pr-title.yml`）とリリース自動化（`release-please.yml`） |
 | `run/` | 開発用クライアント・サーバーの実行ディレクトリ（git 管理外） |
 
