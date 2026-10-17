@@ -2,7 +2,10 @@
 
 Minecraft 1.21.1 / NeoForge 向けの Mod です。
 
-<!-- TODO: Mod の概要・主な機能をここに書く -->
+ゲーム内のチャットから Claude Code に指示して、開発中の mod をその場で変更・確認できる、**mod開発者向けの開発ツール**です。
+AI が編集したコードは、ホットスワップと `/reload` で、ゲームを再起動せずに反映します。
+
+> 現在開発中で、まだ機能は実装されていません。詳しい仕様は [docs/specification.md](docs/specification.md) を参照してください。
 
 ## 動作環境
 
