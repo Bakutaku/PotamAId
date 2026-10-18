@@ -23,6 +23,20 @@ main に Squash merge
   - 例: `feat/river-spawn`, `fix/config-loading`, `docs/readme-install`
 - 作業が終わってマージした作業ブランチは削除します。
 
+### 初回リリースまでの例外
+
+初回リリース（0.1.0）までに作る機能は、機能ごとにブランチを分けず、`feat/initial-release` ブランチにまとめて実装します。初回リリース後は、通常どおり機能追加・修正ごとにブランチを作成します。
+
+- ブランチ内のコミットは、機能ごとに分けて [コミットメッセージ規約](commit-convention.md) の形式で書きます。
+- Squash merge すると 1 つのコミットにまとまり、CHANGELOG には PR タイトルの 1 行しか載りません。機能ごとに CHANGELOG に載せるため、マージ時のコミット本文の末尾に、含まれる変更を Conventional Commits の形式で 1 行ずつ書きます。release-please はそれぞれを別の変更として扱います。
+
+  ```
+  feat: 初回リリースの機能を実装
+
+  feat: プレイヤーのゲーム情報取得と確認コマンドを追加
+  feat: ○○を追加
+  ```
+
 ### main への誤コミット防止
 
 GitHub 側では [Rules](github-settings.md#rules) で main への直接 push を禁止していますが、手元での `git commit` は止められません。
