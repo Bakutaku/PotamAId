@@ -32,6 +32,7 @@
 | `src/main/resources/assets/potamaid/` | テクスチャ・モデル・翻訳などのクライアント用アセット |
 | `src/main/resources/data/potamaid/` | レシピ・ルートテーブル・タグなどのデータ |
 | `src/main/templates/` | ビルド時に `gradle.properties` の値で `${}` が置換されるテンプレート（`neoforge.mods.toml` など） |
+| `src/test/` | GameTest のコードと構造物（配布 jar には含めない） |
 | `src/generated/resources/` | データ生成（`runData`）の出力先。**手動で編集しない** |
 | `docs/` | 開発ルール・機能仕様などのドキュメント |
 | `.github/workflows/` | CI（`build.yml`、`pr-title.yml`）とリリース自動化（`release-please.yml`） |
@@ -43,7 +44,7 @@
 ./gradlew build       # ビルドとチェック。作業の最後に必ず実行して成功を確認する
 ./gradlew runClient   # 開発用クライアントを起動
 ./gradlew runServer   # 開発用サーバーを起動
-./gradlew runGameTestServer  # GameTest を実行して終了する
+./gradlew runGameTestServer -PgameTests  # GameTest を実行して終了する（-PgameTests がないとテストが読み込まれない）
 ./gradlew runData     # データ生成（src/generated/resources に出力）
 ```
 

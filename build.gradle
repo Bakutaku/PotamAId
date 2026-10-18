@@ -181,6 +181,24 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }
 
+// GameTest は test ソースセットに置き、配布 jar に含めない。
+neoForge.addModdingDependenciesTo(sourceSets.test)
+
+// -PgameTests の指定時だけ、test ソースセットを Mod に加えて GameTest を読み込む。
+if (providers.gradleProperty('gameTests').isPresent()) {
+    neoForge.mods.named(mod_id) {
+        sourceSet(sourceSets.test)
+    }
+    neoForge.runs.named('gameTestServer') {
+        gameDirectory = file('build/gametest')
+    }
+}
+
+// test ソースセットには JUnit のテストがまだないため、テストが見つからなくても失敗にしない。
+tasks.named('test', Test) {
+    failOnNoDiscoveredTests = false
+}
+
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.
 idea {
     module {

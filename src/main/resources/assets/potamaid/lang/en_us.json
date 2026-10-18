@@ -1,4 +1,5 @@
 {
+  "commands.potamaid.info.result": "Game information: %s",
   "itemGroup.potamaid": "Example Mod Tab",
   "block.potamaid.example_block": "Example Block",
   "item.potamaid.example_item": "Example Item",
