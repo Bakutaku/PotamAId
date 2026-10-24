@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mod
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -37,5 +40,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: potamaid-${{ github.sha }}
-          path: build/libs/*.jar
+          path: mod/build/libs/*.jar
           retention-days: 7

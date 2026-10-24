@@ -30,7 +30,7 @@ AI が編集したコードは、ホットスワップと `/reload` で、ゲー
 
 ### セットアップ
 
-IntelliJ IDEA でこのフォルダを開くと、Gradle プロジェクトとして自動で読み込まれます。
+IntelliJ IDEA で `mod/` フォルダを開くと、Gradle プロジェクトとして自動で読み込まれます。
 読み込み時に Minecraft と NeoForge が自動でダウンロードされます。
 
 クローンしたら、main への誤コミットを防ぐ Git フックを有効にしてください（[詳細](docs/development-flow.md#main-への誤コミット防止)）。
@@ -41,11 +41,13 @@ git config core.hooksPath .githooks
 
 ### よく使うコマンド
 
+Gradle のコマンドは `mod/` ディレクトリで実行します。
+
 ```bash
 ./gradlew runClient   # 開発用クライアントを起動
 ./gradlew runServer   # 開発用サーバーを起動
-./gradlew runData     # データ生成（src/generated/resources に出力）
-./gradlew build       # build/libs に配布用 jar を作成
+./gradlew runData     # データ生成（mod/src/generated/resources に出力）
+./gradlew build       # mod/build/libs に配布用 jar を作成
 ```
 
 Windows では `./gradlew` を `gradlew.bat` に置き換えてください。

@@ -44,8 +44,13 @@ jobs:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+    defaults:
+      run:
+        working-directory: mod
     steps:
+      # checkout 前なので、mod/ はまだ存在しない
       - name: Check release exists
+        working-directory: ${{ github.workspace }}
         run: gh release view "$TAG" > /dev/null
 
       # リリースタグと同じコミットからビルドする

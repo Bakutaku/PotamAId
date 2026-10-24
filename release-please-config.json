@@ -23,7 +23,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "gradle.properties"
+          "path": "mod/gradle.properties"
         }
       ]
     }

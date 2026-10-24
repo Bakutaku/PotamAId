@@ -62,7 +62,7 @@ git config core.hooksPath .githooks
 
 - `feat:` や `fix:` などを含む変更が main にマージされると、release-please が `chore(main): release x.y.z` というタイトルの **リリース PR** を自動で作成します。その後のマージ内容も、同じリリース PR に追加されていきます。
 - リリース PR には次の変更が含まれます。
-  - `gradle.properties` の `mod_version` の更新
+  - `mod/gradle.properties` の `mod_version` の更新
   - `CHANGELOG.md` の更新
 - **リリースしたいタイミングで、リリース PR をマージします。** マージすると次の処理が自動で行われます。
   1. `vX.Y.Z` のタグを作成
@@ -83,7 +83,7 @@ CI を動かしてからマージしたい場合は、リリース PR をいっ�
 
 以下は release-please が管理しているため、手動で編集しないでください。
 
-- `gradle.properties` の `mod_version`
+- `mod/gradle.properties` の `mod_version`
 - `CHANGELOG.md`
 - `.release-please-manifest.json`
 - `v*` 形式の git タグ

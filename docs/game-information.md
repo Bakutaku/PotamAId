@@ -45,16 +45,16 @@
 
 ## 検証
 
-Windows の PowerShell では次を実行します。Java 21 が必要です。
+Windows の PowerShell では次を実行します。Java 21 が必要です。`mod/` ディレクトリで実行します。
 
 ```powershell
 .\gradlew.bat build
 .\gradlew.bat runGameTestServer -PgameTests
 ```
 
-`build` は本体とテストのコンパイルを確認します。GameTest の実行は2つ目のコマンドです。テストコードは `test` ソースセット（`src/test/`）に置き、配布 jar には含めません。`-PgameTests` の指定時だけテストを Mod の実行対象へ加えます。
+`build` は本体とテストのコンパイルを確認します。GameTest の実行は2つ目のコマンドです。テストコードは `test` ソースセット（`mod/src/test/`）に置き、配布 jar には含めません。`-PgameTests` の指定時だけテストを Mod の実行対象へ加えます。
 
-GameTest は `build/gametest/` の専用ワールドで動き、終了します。通常の `run/` のワールドは使いません。`src/test/resources/data/potamaid/structure/empty.nbt` は、テスト配置用の 1×1×1 の空の構造物です。
+GameTest は `mod/build/gametest/` の専用ワールドで動き、終了します。通常の `mod/run/` のワールドは使いません。`mod/src/test/resources/data/potamaid/structure/empty.nbt` は、テスト配置用の 1×1×1 の空の構造物です。
 
 7件のテストで次を確認します。
 
