@@ -35,6 +35,10 @@ export class ConsultRunner {
         instructions: CONSULT_INSTRUCTIONS,
         model: consult.model,
         effort: consult.effort,
+        mcpServers: await this.ctx.mcpServers({
+          type: 'project',
+          id: consult.projectId,
+        }),
       };
       const sessionId = store.consults.getSessionId(consultId);
       let session: AiSession;

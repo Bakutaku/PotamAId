@@ -3,8 +3,11 @@
  *
  * - `*_INSTRUCTIONS`: セッション全体に与える指示（役割と守ること）
  * - `build*Prompt`: 各ターンでユーザーの指示として送る文章
+ *
+ * 出力の各項目の意味は構造化出力の JSON Schema の description で伝わるため、ここでは繰り返さない。
  */
 import type { Goal, Task } from '../../shared/domain';
+import { BRIDGE_MCP_SERVER_NAME } from '../mcp/bridgeTools';
 
 /**
  * Windows での注意。Windows PowerShell 5.1 の Get-Content は、指定しないと
@@ -12,53 +15,40 @@ import type { Goal, Task } from '../../shared/domain';
  */
 const WINDOWS_NOTES =
   process.platform === 'win32'
-    ? `
-Windows PowerShell でファイルを読むときは、Get-Content に -Encoding UTF8 を付けてください。`
+    ? '\nPowerShell の Get-Content には -Encoding UTF8 を付けてください。'
     : '';
 
 /** すべてのセッションに共通する前提 */
-const COMMON = `あなたは PotamAId Bridge から実行されている、Minecraft の mod 開発を手伝う AI です。
-作業ディレクトリは、ユーザーが開発している mod（対象mod）のリポジトリです。
-回答と報告は日本語で書いてください。${WINDOWS_NOTES}`;
+const COMMON = `あなたは PotamAId Bridge から実行される、Minecraft の mod 開発を手伝う AI です。
+作業ディレクトリはユーザーの mod のリポジトリです。日本語で答えてください。
+目標やほかのタスクの詳細・結果は、${BRIDGE_MCP_SERVER_NAME} の MCP ツールで調べられます。${WINDOWS_NOTES}`;
 
 /** 計画の作成（読み取り専用） */
 export const PLAN_INSTRUCTIONS = `${COMMON}
 
-このセッションでは、ユーザーの目標を実現するための計画を作ります。
-- ファイルを変更せず、コードとリソースを読んで調べてください。
-- 計画は、目標を実装の単位のタスクに分けたものです。各タスクは別々の新しいセッションで実行されるため、1つのセッションで完結できる大きさにしてください。
-- タスクには種類（kind）を付けてください。
-  - edit: ファイルを編集するタスク。対象modごとに1件ずつ順に実行されます。
-  - investigate: ファイルを変更せずに調べるだけのタスク。読み取り専用で、他のタスクと並行して実行されます。結果は、そのタスクに依存するタスクに渡されます。
-- 調査タスクは、実装の前に広い範囲を調べる必要があるときだけ作ってください。計画を作る間に調べられたことは、編集タスクの説明に書けば足ります。
-- タスクの説明には、実装する内容と、変更するファイルの見込みを具体的に書いてください。調査タスクには、調べる内容と、後のタスクに渡す結果を書いてください。
-- 先に終わっている必要があるタスクを dependsOn に書いてください。依存関係のないタスクは並べた順に実行されます。
-- タスクはユーザーの確認を待たずに続けて実行され、ユーザーはすべてのタスクが終わってから、まとめて動作を確かめます。
-- 最後の発言は、指定した JSON の形式だけにしてください。`;
+ファイルを変更せずにコードを調べ、ユーザーの目標を実装の単位のタスクに分けた計画を作ってください。
+- 各タスクは別々の新しいセッションで実行します。1つのセッションで終わる大きさにしてください。
+- edit は対象modごとに1件ずつ、investigate は読み取り専用で並行して実行します。調査タスクは、実装の前に広く調べる必要があるときだけ作ってください。
+- タスクはユーザーの確認なしに続けて実行し、ユーザーは最後にまとめて動作を確かめます。`;
 
 /** 編集タスクの実行（作業ディレクトリの編集あり） */
 export const TASK_INSTRUCTIONS = `${COMMON}
 
-このセッションでは、目標の計画のうち、指定された1件のタスクだけを実装します。
-- 他のタスクの範囲には手を出さないでください。必要なら報告に書いてください。
-- 変更したら、可能な範囲でビルドやテストで確かめてください。
-- Git のコミットやブランチの操作はしないでください。ユーザーは、目標のタスクがすべて終わってから、まとめて動作と差分を確かめます。
-- 最後の発言は、指定した JSON の形式で、行った変更と確かめる方法を報告してください。`;
+計画のうち、指定された1件のタスクだけを実装してください。
+- 他のタスクの範囲には手を出さず、必要なら報告に書いてください。
+- 可能な範囲でビルドやテストで確かめてください。
+- Git のコミットやブランチの操作はしないでください。`;
 
 /** 調査タスクの実行（読み取り専用） */
 export const INVESTIGATE_INSTRUCTIONS = `${COMMON}
 
-このセッションでは、目標の計画のうち、指定された1件の調査タスクを行います。
-- ファイルを変更せず、コードとリソースを読んで調べてください。
-- 調べた結果は、このタスクに依存する後のタスクに渡されます。後のタスクがそのまま使えるように、分かったこと（関係するファイル・クラス・手順など）を具体的に書いてください。
-- 最後の発言は、指定した JSON の形式で、調べた結果を報告してください。`;
+計画のうち、指定された1件の調査タスクを、ファイルを変更せずに行ってください。
+結果は後のタスクに渡します。関係するファイル・クラス・手順などを具体的に報告してください。`;
 
 /** 相談（読み取り専用） */
 export const CONSULT_INSTRUCTIONS = `${COMMON}
 
-このセッションは相談です。ユーザーの質問に答えてください。
-- ファイルを変更しないでください。必要ならコードを読んで調べてから答えてください。
-- 実装が必要な内容は、手順や方針の説明にとどめてください。`;
+ユーザーの質問に答えてください。ファイルは変更せず、実装が必要な内容は手順や方針の説明にとどめてください。`;
 
 /** 計画の作成の最初のターン */
 export function buildPlanPrompt(goal: Goal): string {
@@ -66,7 +56,6 @@ export function buildPlanPrompt(goal: Goal): string {
 
 次の目標の計画を作ってください。
 
-# 目標
 ${goal.text}`;
 }
 
@@ -83,69 +72,68 @@ export function buildReplanPrompt(
 # 目標
 ${goal.text}
 
-# 追加の指示
+# 指示
 ${instruction}
 
 # いまの計画（ユーザーが編集した内容を含む）
-${formatTaskList(currentTasks)}`;
+${currentTasks.map((t) => `${taskLine(t, currentTasks)}: ${t.description}`).join('\n')}`;
 }
 
-/** タスクの実行の最初のターン。目標と計画の全体と、依存先のタスクの結果を添える */
+/**
+ * タスクの実行の最初のターン。
+ * 目標と、計画の一覧（題名だけ）、依存先のタスクの結果を添える。
+ * ほかのタスクの説明や結果は、必要なら AI が Bridge の MCP ツールで調べる。
+ */
 export function buildTaskPrompt(
   goal: Goal,
   tasks: Task[],
   task: Task,
   instructions: string[],
 ): string {
+  const investigate = task.kind === 'investigate';
   const results = tasks
     .filter((t) => task.dependsOn.includes(t.id) && t.result)
     .map((t) => `## #${t.number} ${t.title}\n${t.result}`)
     .join('\n\n');
-  const resultSection = results ? `\n\n# 依存先のタスクの結果\n${results}` : '';
-  const extra =
-    instructions.length > 0
-      ? `\n\n# ユーザーからの追加の指示\n${instructions.map((s) => `- ${s}`).join('\n')}`
-      : '';
-  const [request, heading] =
-    task.kind === 'investigate'
-      ? ['調べてください', '今回調べるタスク']
-      : ['実装してください', '今回実装するタスク'];
-  return `${task.title}（${goal.title} / #${task.number}・${task.kind === 'investigate' ? '調査' : '実装'}）
+  const sections = [
+    `# 目標\n${goal.text}`,
+    goal.planSummary && `# 計画の方針\n${goal.planSummary}`,
+    `# 計画のタスク\n${tasks.map((t) => taskLine(t, tasks, task)).join('\n')}`,
+    results && `# 依存先のタスクの結果\n${results}`,
+    `# 今回のタスク: #${task.number} ${task.title}\n${task.description}`,
+    instructions.length > 0 &&
+      `# ユーザーからの追加の指示\n${bulletList(instructions)}`,
+  ].filter(Boolean);
+  return `${task.title}（${goal.title} / #${task.number}・${investigate ? '調査' : '実装'}）
 
-次の目標の計画のうち、タスク #${task.number} を${request}。
+タスク #${task.number} を${investigate ? '調べて' : '実装して'}ください。
 
-# 目標
-${goal.text}
-
-# 計画の要約
-${goal.planSummary ?? '（なし）'}
-
-# 計画のタスクの一覧
-${formatTaskList(tasks)}${resultSection}
-
-# ${heading}
-#${task.number} ${task.title}
-${task.description}${extra}`;
+${sections.join('\n\n')}`;
 }
 
 /** タスクへの追加の指示のターン（同じセッションの続き） */
 export function buildFollowUpPrompt(instructions: string[]): string {
   return `このタスクについて、次の指示に対応してください。
 
-${instructions.map((s) => `- ${s}`).join('\n')}`;
+${bulletList(instructions)}`;
 }
 
-function formatTaskList(tasks: Task[]): string {
-  const numberOf = new Map(tasks.map((t) => [t.id, t.number]));
-  return tasks
-    .map((t) => {
-      const deps = t.dependsOn
-        .map((id) => numberOf.get(id))
-        .filter((n) => n !== undefined)
-        .map((n) => `#${n}`)
-        .join('・');
-      const kind = t.kind === 'investigate' ? '調査・' : '';
-      return `- #${t.number} ${t.title}（${kind}${deps ? `${deps} の後` : '依存なし'}）: ${t.description}`;
-    })
-    .join('\n');
+/** 計画の一覧の1行（「- #2 題名（調査・#1 の後・完了）」） */
+function taskLine(t: Task, tasks: Task[], current?: Task): string {
+  const numberOf = new Map(tasks.map((x) => [x.id, x.number]));
+  const deps = t.dependsOn
+    .map((id) => numberOf.get(id))
+    .filter((n) => n !== undefined)
+    .map((n) => `#${n}`)
+    .join('・');
+  const notes = [
+    t.kind === 'investigate' && '調査',
+    deps && `${deps} の後`,
+    t.id === current?.id ? '今回' : t.status === 'done' && '完了',
+  ].filter(Boolean);
+  return `- #${t.number} ${t.title}${notes.length > 0 ? `（${notes.join('・')}）` : ''}`;
+}
+
+function bulletList(items: string[]): string {
+  return items.map((s) => `- ${s}`).join('\n');
 }

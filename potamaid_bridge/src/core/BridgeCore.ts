@@ -30,6 +30,7 @@ import type {
   ProjectPatch,
 } from '../shared/ipc';
 import { ApprovalBroker } from './ApprovalBroker';
+import { BridgeMcpServer } from './mcp/BridgeMcpServer';
 import { TypedEmitter } from './events';
 import { checkTaskGraph } from './planning/taskGraph';
 import type { AiProvider } from './providers/AiProvider';
@@ -73,6 +74,7 @@ export class BridgeCore implements CoreApi {
   private readonly store: BridgeStore;
   private readonly providers: ProviderRegistry;
   private readonly broker = new ApprovalBroker();
+  private readonly mcp: BridgeMcpServer;
   private readonly ctx: RunnerContext;
   private readonly scheduler: Scheduler;
   private readonly planRunner: PlanRunner;
@@ -87,11 +89,15 @@ export class BridgeCore implements CoreApi {
     this.providers = new ProviderRegistry(
       options.createProviders(() => this.settings),
     );
+    this.mcp = new BridgeMcpServer(this.store, (error) =>
+      this.reportError(error),
+    );
     this.ctx = new RunnerContext(
       this.store,
       this.providers,
       this.broker,
       this.events,
+      this.mcp,
     );
     this.planRunner = new PlanRunner(this.ctx);
     this.taskRunner = new TaskRunner(this.ctx);
@@ -119,6 +125,8 @@ export class BridgeCore implements CoreApi {
 
   /** プロバイダーの状態を確かめ、実行できるものを始める */
   start(): void {
+    // セッションを始めるときにも待つので、ここでは待ち受けの開始だけを先に頼む
+    this.mcp.start().catch((error: unknown) => this.reportError(error));
     void this.refreshProviders();
     this.scheduler.pump();
   }
@@ -556,6 +564,7 @@ export class BridgeCore implements CoreApi {
     this.scheduler.clearQueue();
     await this.providers.disposeAll();
     await this.scheduler.stop(SHUTDOWN_TIMEOUT_MS);
+    await this.mcp.close();
     this.store.close();
   }
 

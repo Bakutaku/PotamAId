@@ -62,6 +62,7 @@ export class TaskRunner {
           : TASK_INSTRUCTIONS,
         model: goal.model,
         effort: goal.effort,
+        mcpServers: await this.ctx.mcpServers({ type: 'goal', id: goal.id }),
       };
       const outputSchema = investigate
         ? INVESTIGATE_RESULT_SCHEMA

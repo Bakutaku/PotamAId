@@ -17,6 +17,7 @@ import type {
   AiApprovalRequest,
   AiProvider,
   AiSession,
+  McpServerConfig,
   SessionOptions,
   TurnHandle,
   TurnHandlers,
@@ -32,6 +33,7 @@ import type { ServerRequest } from './protocol/ServerRequest';
 import type { Account } from './protocol/v2/Account';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
+import type { JsonValue } from './protocol/serde_json/JsonValue';
 import type { Turn } from './protocol/v2/Turn';
 import {
   toElicitationRequest,
@@ -134,12 +136,10 @@ export class CodexProvider implements AiProvider {
 
   async startSession(options: SessionOptions): Promise<AiSession> {
     const client = await this.getClient();
-    const response = await client.request('thread/start', {
-      cwd: options.cwd,
-      model: this.model(options),
-      ...CODEX_PERMISSIONS[options.access],
-      developerInstructions: options.instructions ?? null,
-    });
+    const response = await client.request(
+      'thread/start',
+      this.threadParams(options),
+    );
     this.assertAvailable();
     this.loadedThreads.add(response.thread.id);
     return this.createSession(response.thread.id, options);
@@ -406,13 +406,21 @@ export class CodexProvider implements AiProvider {
     const client = await this.getClient();
     await client.request('thread/resume', {
       threadId,
+      ...this.threadParams(options),
+      excludeTurns: true,
+    });
+    this.loadedThreads.add(threadId);
+  }
+
+  /** thread/start と thread/resume で共通の設定 */
+  private threadParams(options: SessionOptions) {
+    return {
       cwd: options.cwd,
       model: this.model(options),
       ...CODEX_PERMISSIONS[options.access],
       developerInstructions: options.instructions ?? null,
-      excludeTurns: true,
-    });
-    this.loadedThreads.add(threadId);
+      config: mcpServersConfig(options.mcpServers ?? []),
+    };
   }
 
   /** セッションの指定、なければ設定の既定。どちらも空なら Codex の設定に従う */
@@ -738,4 +746,22 @@ function describeAccount(account: Account): string {
     default:
       return 'ログイン済み';
   }
+}
+
+/**
+ * セッションの MCP サーバーを、Codex の設定の上書き（config）にする。
+ * キーをドット区切りにすると、利用者が config.toml に書いた MCP サーバーを残したまま追加できる
+ */
+export function mcpServersConfig(
+  servers: McpServerConfig[],
+): Record<string, JsonValue> | null {
+  if (servers.length === 0) {
+    return null;
+  }
+  return Object.fromEntries(
+    servers.map((server) => [
+      `mcp_servers.${server.name}`,
+      { url: server.url, http_headers: server.headers },
+    ]),
+  );
 }

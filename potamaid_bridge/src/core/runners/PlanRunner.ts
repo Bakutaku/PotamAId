@@ -45,6 +45,7 @@ export class PlanRunner {
         instructions: PLAN_INSTRUCTIONS,
         model: goal.model,
         effort: goal.effort,
+        mcpServers: await this.ctx.mcpServers({ type: 'goal', id: goal.id }),
       };
       const sessionId = store.goals.getPlanSessionId(goalId);
       let session: AiSession;

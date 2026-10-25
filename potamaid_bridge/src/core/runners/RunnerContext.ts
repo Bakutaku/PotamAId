@@ -17,9 +17,11 @@ import { describeApproval, isPermissionRequest } from '../../shared/approvals';
 import type { StreamingText, UiCommand } from '../../shared/ipc';
 import type { ApprovalBroker } from '../ApprovalBroker';
 import type { TypedEmitter } from '../events';
+import type { BridgeMcpServer, SessionScope } from '../mcp/BridgeMcpServer';
 import type {
   AiApprovalRequest,
   AiSession,
+  McpServerConfig,
   TurnHandle,
   TurnInput,
   TurnResult,
@@ -81,7 +83,14 @@ export class RunnerContext {
     readonly providers: ProviderRegistry,
     readonly broker: ApprovalBroker,
     readonly emitter: TypedEmitter<CoreEvents>,
+    private readonly mcp: BridgeMcpServer,
   ) {}
+
+  /** セッションに渡す MCP サーバー（Bridge のツール）。使えなければ空 */
+  async mcpServers(scope: SessionScope): Promise<McpServerConfig[]> {
+    const config = await this.mcp.configFor(scope);
+    return config ? [config] : [];
+  }
 
   /** 状態が変わったことを知らせる */
   changed(): void {

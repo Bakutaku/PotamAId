@@ -173,6 +173,10 @@ describe('BridgeCore', () => {
     const { goal } = await approvedGoal();
     expect(core.snapshot().goals[0]?.title).toBe('粉砕機を追加する');
     expect(provider.sessions[0]?.access).toBe('readOnly');
+    // 計画のセッションには、目標の範囲の Bridge の MCP ツールを渡す
+    expect(provider.sessions[0]?.mcpServers?.[0]?.url).toMatch(
+      new RegExp(`^http://127\\.0\\.0\\.1:\\d+/mcp/goal/${goal.id}$`),
+    );
 
     // タスク #1 は承認を求めてから終わる
     provider.scripts.push(async ({ handlers }) => {
@@ -278,7 +282,7 @@ describe('BridgeCore', () => {
           resolve(
             completed(
               JSON.stringify({
-                summary: input.text.includes('# 今回調べるタスク\n#1')
+                summary: input.text.includes('# 今回のタスク: #1')
                   ? '機械は Machine.java'
                   : 'レシピは recipes/',
               }),
@@ -373,7 +377,9 @@ describe('BridgeCore', () => {
     const { goal } = await approvedGoal();
     provider.scripts.push(untilCancelled);
     await core.approvePlan(goal.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('running'));
+    // ターンが始まってから中止する
+    await vi.waitFor(() => expect(provider.inputs).toHaveLength(2));
+    expect(taskByNumber(1)?.status).toBe('running');
 
     await core.cancelTask(taskByNumber(1)!.id);
     await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('todo'));

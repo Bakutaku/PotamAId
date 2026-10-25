@@ -29,6 +29,17 @@ export interface SessionOptions {
   model?: string | null;
   /** 思考量（reasoning effort）。null ならモデルの既定 */
   effort?: string | null;
+  /** セッションに接続する MCP サーバー（Bridge のツールなど） */
+  mcpServers?: McpServerConfig[];
+}
+
+/** Streamable HTTP の MCP サーバーの接続先 */
+export interface McpServerConfig {
+  /** AI から見えるサーバーの名前 */
+  name: string;
+  url: string;
+  /** 接続のたびに付けるヘッダー（認証のトークンなど） */
+  headers: Record<string, string>;
 }
 
 export interface TurnInput {

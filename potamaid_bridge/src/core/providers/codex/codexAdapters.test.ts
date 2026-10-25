@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { mcpServersConfig } from './CodexProvider';
 import { describeCommand, unwrapShell } from './mapping';
 import { resolveLaunchCommand } from './resolveExecutable';
 import {
@@ -135,6 +136,26 @@ describe('MCP の入力要求', () => {
     expect(
       toElicitationResponse({ decision: 'allow', values: { name: 'x' } }),
     ).toEqual({ action: 'accept', content: { name: 'x' }, _meta: null });
+  });
+});
+
+describe('セッションの MCP サーバー', () => {
+  it('ドット区切りのキーで、利用者の設定に追加する', () => {
+    expect(
+      mcpServersConfig([
+        {
+          name: 'potamaid_bridge',
+          url: 'http://127.0.0.1:1234/mcp/goal/g',
+          headers: { Authorization: 'Bearer x' },
+        },
+      ]),
+    ).toEqual({
+      'mcp_servers.potamaid_bridge': {
+        url: 'http://127.0.0.1:1234/mcp/goal/g',
+        http_headers: { Authorization: 'Bearer x' },
+      },
+    });
+    expect(mcpServersConfig([])).toBeNull();
   });
 });
 
