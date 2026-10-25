@@ -36,6 +36,8 @@ export function BoardColumn({
           task={task}
           tasks={tasks}
           compact={column.compact}
+          // 列の見出しと同じ状態は、カードに重ねて出さない
+          showStatus={task.status !== column.statuses[0]}
           selected={task.id === selectedTaskId}
           onSelect={() => onSelectTask(task.id)}
         />

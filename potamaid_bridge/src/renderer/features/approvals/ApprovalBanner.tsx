@@ -3,7 +3,7 @@
  * どの目標を見ていても気付けるように、対象modの承認待ち（許可・AI からの質問・
  * MCP の入力要求）をすべて出し、その場で回答できるようにする。
  */
-import type { Ref } from 'react';
+import { useState, type Ref } from 'react';
 import type { Approval } from '../../../shared/domain';
 import type { BridgeSnapshot } from '../../../shared/ipc';
 import { Icon } from '../../components/Icon';
@@ -20,6 +20,14 @@ export function ApprovalBanner({
   /** トレイの「承認待ちを確認」で、この枠にフォーカスを移すのに使う */
   ref?: Ref<HTMLElement>;
 }) {
+  // 見ている画面の邪魔になるときは、見出しだけにたためる。
+  // たたんだときの承認待ちを覚えておき、新しい承認待ちが届いたら開き直す
+  const [collapsedIds, setCollapsedIds] = useState<string[] | null>(null);
+  const collapsed =
+    collapsedIds !== null &&
+    approvals.every((a) => collapsedIds.includes(a.id));
+  const setCollapsed = (value: boolean) =>
+    setCollapsedIds(value ? approvals.map((a) => a.id) : null);
   if (approvals.length === 0) {
     return null;
   }
@@ -28,24 +36,43 @@ export function ApprovalBanner({
       ref={ref}
       aria-label="承認待ち"
       tabIndex={-1}
-      className="flex flex-col gap-2 rounded-box border border-warning bg-warning/12 px-3.5 py-3"
+      // 「承認待ちを確認」でフォーカスが移ったら開く
+      onFocus={() => setCollapsed(false)}
+      className="mx-4 mt-4 flex max-h-[45%] shrink-0 flex-col rounded-box border border-warning bg-warning/12"
     >
-      <h2 className="flex items-center gap-2 text-sm font-bold text-warning-strong">
-        <Icon name="shield" size={18} />
-        承認待ち {approvals.length} 件
-        <span className="text-xs font-normal text-muted">
-          AI はあなたの対応を待って止まっています
+      <h2 className="flex items-center gap-2 px-3.5 py-2.5 text-sm font-bold text-warning-strong">
+        <Icon name="shield" size={18} className="shrink-0" />
+        <span className="shrink-0">承認待ち {approvals.length} 件</span>
+        <span className="min-w-0 truncate text-xs font-normal text-muted">
+          AI があなたの対応を待っています
         </span>
-      </h2>
-      {approvals.map((approval) => (
-        <div
-          key={approval.id}
-          className="flex flex-col gap-2 rounded-field bg-base-100 px-3 py-2.5"
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed(!collapsed)}
+          className="btn btn-ghost btn-xs ml-auto font-normal text-muted"
         >
-          <OwnerLine snapshot={snapshot} approval={approval} />
-          <ApprovalCard approval={approval} />
+          {collapsed ? '開く' : 'たたむ'}
+          <Icon
+            name="chevronDown"
+            size={14}
+            className={collapsed ? '' : 'rotate-180'}
+          />
+        </button>
+      </h2>
+      {!collapsed && (
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3.5 pb-3">
+          {approvals.map((approval) => (
+            <div
+              key={approval.id}
+              className="flex flex-col gap-2 rounded-field bg-base-100 px-3 py-2.5"
+            >
+              <OwnerLine snapshot={snapshot} approval={approval} />
+              <ApprovalCard approval={approval} />
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </section>
   );
 }

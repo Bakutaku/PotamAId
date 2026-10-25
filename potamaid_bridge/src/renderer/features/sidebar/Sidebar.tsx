@@ -23,7 +23,7 @@ export function Sidebar({
   return (
     <nav
       aria-label="目標と相談"
-      className="flex w-64 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-base-300 bg-base-100 px-2 py-3"
+      className="flex w-56 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-base-300 bg-base-100 px-2 py-3"
     >
       <SectionHeader
         title="目標"

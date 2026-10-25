@@ -43,7 +43,7 @@ export function ConsultView({
   return (
     <section
       aria-label="相談"
-      className="flex min-h-[420px] max-w-[860px] flex-1 flex-col rounded-box border border-base-300 bg-base-100"
+      className="flex min-h-[280px] max-w-[860px] flex-1 flex-col rounded-box border border-base-300 bg-base-100"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-base-300 px-4 py-3">
         <h1 className="text-[15px] font-bold">{consult.title}</h1>

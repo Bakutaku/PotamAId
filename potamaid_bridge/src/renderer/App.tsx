@@ -73,7 +73,8 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
       <AppHeader snapshot={snapshot} project={project} />
       <div className="flex min-h-0 flex-1">
         {project && <Sidebar snapshot={snapshot} selection={selection} />}
-        <main className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
+        {/* 承認待ちの枠は上に固定し、その下の内容だけをスクロールする */}
+        <main className="flex min-w-0 flex-1 flex-col">
           {project ? (
             <>
               <ApprovalBanner
@@ -81,14 +82,18 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
                 snapshot={snapshot}
                 approvals={approvals}
               />
-              <MainContent
-                snapshot={snapshot}
-                selection={selection}
-                approvals={approvals}
-              />
+              <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
+                <MainContent
+                  snapshot={snapshot}
+                  selection={selection}
+                  approvals={approvals}
+                />
+              </div>
             </>
           ) : (
-            <NoProjects />
+            <div className="overflow-y-auto p-4">
+              <NoProjects />
+            </div>
           )}
         </main>
         {goal && task && isGoalStarted(goal) && (

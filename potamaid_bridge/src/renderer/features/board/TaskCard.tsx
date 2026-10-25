@@ -8,6 +8,7 @@ export function TaskCard({
   task,
   tasks,
   compact,
+  showStatus,
   selected,
   onSelect,
 }: {
@@ -15,6 +16,8 @@ export function TaskCard({
   /** 同じ目標のタスク（補足の文の計算に使う） */
   tasks: Task[];
   compact: boolean;
+  /** 状態のバッジを出すか */
+  showStatus: boolean;
   selected: boolean;
   onSelect(): void;
 }) {
@@ -37,7 +40,7 @@ export function TaskCard({
         <span className="text-[11px] text-muted">#{task.number}</span>
         <span className="min-w-0 flex-1 font-medium">{task.title}</span>
         {task.kind === 'investigate' && <StatusBadge meta={INVESTIGATE_META} />}
-        <StatusBadge meta={TASK_STATUS[task.status]} />
+        {showStatus && <StatusBadge meta={TASK_STATUS[task.status]} />}
       </span>
       {subtitle && (
         <span className="line-clamp-2 text-xs text-muted">{subtitle}</span>

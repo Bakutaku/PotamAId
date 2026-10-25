@@ -38,18 +38,25 @@ export function GoalListItem({
         selected ? 'bg-primary/15 hover:bg-primary/20' : ''
       }`}
     >
-      <span className="font-medium">{goal.title}</span>
-      {progressText && (
-        <span className="flex items-center gap-2 text-[11px] text-muted">
+      <span className="line-clamp-2 leading-snug font-medium">
+        {goal.title}
+      </span>
+      {/* 状態と進み具合を1行にまとめる */}
+      <span className="flex items-center gap-2 text-[11px] text-muted">
+        <span className={`shrink-0 ${TEXT_CLASS[meta.tone]}`}>
+          {meta.label}
+        </span>
+        {started && (
           <ProgressBar
-            percent={started ? progress.percent : 0}
+            percent={progress.percent}
             label={`${goal.title} の進み具合`}
           />
-          {progressText}
-        </span>
-      )}
-      <span className={`text-[11px] ${TEXT_CLASS[meta.tone]}`}>
-        {meta.label}
+        )}
+        {progressText && (
+          <span className={`shrink-0 ${started ? '' : 'ml-auto'}`}>
+            {progressText}
+          </span>
+        )}
       </span>
     </button>
   );

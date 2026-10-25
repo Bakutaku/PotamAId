@@ -46,7 +46,8 @@ export function TaskDetail({
   return (
     <section
       aria-label="タスクの詳細"
-      className="flex w-[420px] max-w-[440px] shrink-0 flex-col border-l border-base-300 bg-base-100"
+      // 狭いウィンドウでもボードが潰れないよう、幅をウィンドウに合わせて縮める
+      className="flex w-[clamp(320px,38vw,460px)] shrink-0 flex-col border-l border-base-300 bg-base-100"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-base-300 px-4 py-3">
         <span className="text-xs text-muted">#{task.number}</span>
@@ -82,14 +83,12 @@ export function TaskDetail({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
-        <div className="flex flex-col gap-0.5 rounded-box bg-base-200 px-3.5 py-2.5">
-          <span className="text-[11px] text-muted">
-            このタスクの内容（計画より）
-          </span>
-          <span className="whitespace-pre-wrap">{task.description}</span>
+        <div className="flex flex-col gap-1 rounded-box bg-base-200 px-3.5 py-2.5">
+          {task.description && (
+            <span className="whitespace-pre-wrap">{task.description}</span>
+          )}
           <span className="text-[11px] text-muted">
             {dependencyText(task, tasks)}・{runLabel}
-            ・専用のセッション（目標と計画を添えて開始）
           </span>
         </div>
 
@@ -105,10 +104,7 @@ export function TaskDetail({
         )}
         {task.status === 'todo' && !task.paused && (
           <div className="rounded-box bg-base-200 px-3.5 py-3 text-muted">
-            まだ実行していません（{describeTask(task, tasks)}）。
-            {investigate
-              ? '調査タスクは読み取り専用なので、ほかのタスクと並行して実行します。'
-              : '編集タスクは対象modごとに 1 件ずつ実行します。'}
+            まだ実行していません（{describeTask(task, tasks)}）
           </div>
         )}
         {task.status === 'running' && <RunningIndicator />}
