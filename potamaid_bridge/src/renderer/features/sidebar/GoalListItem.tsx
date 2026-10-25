@@ -7,6 +7,7 @@ import {
 } from '../../lib/selectors';
 import { GOAL_STATUS } from '../../lib/statusMeta';
 import { TEXT_CLASS } from '../../lib/tone';
+import { SELECTABLE_ITEM_CLASS, SELECTED_ITEM_CLASS } from './itemClasses';
 
 /** サイドバーの目標の1件（題名・進み具合・状態） */
 export function GoalListItem({
@@ -34,8 +35,8 @@ export function GoalListItem({
       type="button"
       onClick={onSelect}
       aria-current={selected ? 'true' : undefined}
-      className={`flex w-full flex-col gap-1 rounded-field px-2.5 py-2 text-left hover:bg-base-200 ${
-        selected ? 'bg-primary/15 hover:bg-primary/20' : ''
+      className={`${SELECTABLE_ITEM_CLASS} flex-col gap-1 py-2 ${
+        selected ? SELECTED_ITEM_CLASS : ''
       }`}
     >
       <span className="line-clamp-2 leading-snug font-medium">

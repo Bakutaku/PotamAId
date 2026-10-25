@@ -9,7 +9,7 @@ export function InlineApprovals({ approvals }: { approvals: Approval[] }) {
         <div
           key={approval.id}
           role="alert"
-          className="rounded-box border border-warning bg-warning/12 px-3.5 py-3"
+          className="animate-glow-warning rounded-box border border-warning bg-warning/12 px-3.5 py-3"
         >
           <ApprovalCard approval={approval} />
         </div>

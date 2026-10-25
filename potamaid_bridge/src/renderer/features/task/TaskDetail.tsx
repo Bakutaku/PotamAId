@@ -47,7 +47,7 @@ export function TaskDetail({
     <section
       aria-label="タスクの詳細"
       // 狭いウィンドウでもボードが潰れないよう、幅をウィンドウに合わせて縮める
-      className="flex w-[clamp(320px,38vw,460px)] shrink-0 flex-col border-l border-base-300 bg-base-100"
+      className="flex w-[clamp(320px,38vw,460px)] shrink-0 animate-slide-in-right flex-col border-l border-base-300 bg-base-100"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-base-300 px-4 py-3">
         <span className="text-xs text-muted">#{task.number}</span>
@@ -82,7 +82,11 @@ export function TaskDetail({
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
+      {/* 別のタスクを選んだら、内容をふわっと入れ替える */}
+      <div
+        key={task.id}
+        className="flex min-h-0 flex-1 animate-fade-in flex-col gap-3.5 overflow-y-auto p-4"
+      >
         <div className="flex flex-col gap-1 rounded-box bg-base-200 px-3.5 py-2.5">
           {task.description && (
             <span className="whitespace-pre-wrap">{task.description}</span>
@@ -114,7 +118,7 @@ export function TaskDetail({
         {task.needsGameRestart && task.status === 'done' && (
           <div
             role="status"
-            className="flex items-center gap-2 rounded-box bg-success/15 px-3.5 py-2.5 text-success-strong"
+            className="flex animate-pop-in items-center gap-2 rounded-box bg-success/15 px-3.5 py-2.5 text-success-strong"
           >
             <Icon name="restart" />
             反映にはゲームの再起動が必要です
@@ -122,7 +126,7 @@ export function TaskDetail({
         )}
 
         {task.status === 'failed' && (
-          <div className="flex flex-wrap items-center gap-2 rounded-box border border-error/40 px-3.5 py-3">
+          <div className="flex animate-pop-in flex-wrap items-center gap-2 rounded-box border border-error/40 px-3.5 py-3">
             <span className="text-error-strong">
               {task.error ?? '失敗しました'}
             </span>

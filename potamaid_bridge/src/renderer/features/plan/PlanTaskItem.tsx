@@ -17,7 +17,7 @@ export function PlanTaskItem({
   onRemove(): void;
 }) {
   return (
-    <li className="flex items-start gap-2.5 rounded-field border border-base-300 px-3 py-2.5">
+    <li className="flex animate-fade-in items-start gap-2.5 rounded-field border border-base-300 px-3 py-2.5 transition-colors duration-150 hover:border-primary/40">
       <span className="inline-flex size-[26px] shrink-0 items-center justify-center rounded-full bg-base-200 text-xs font-bold">
         {task.number}
       </span>

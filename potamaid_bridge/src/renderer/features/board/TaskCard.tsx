@@ -22,20 +22,34 @@ export function TaskCard({
   onSelect(): void;
 }) {
   const subtitle = compact ? '' : describeTask(task, tasks);
+  const approval = task.status === 'approval';
   const border = selected
     ? 'border-primary ring-1 ring-primary'
-    : task.status === 'approval'
+    : approval
       ? 'border-warning'
       : 'border-base-300';
+  // 承認待ちは枠を光らせる。それ以外は、列を移ると作り直されるので、
+  // そのたびに弾ませて出し、移ったことに気付けるようにする
+  const animation =
+    approval && !selected ? 'animate-glow-warning' : 'animate-pop-in';
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex w-full flex-col gap-1 rounded-[calc(var(--radius-box)-4px)] border bg-base-100 text-left hover:border-primary/60 ${border} ${
+      className={`relative flex w-full flex-col gap-1 overflow-hidden rounded-[calc(var(--radius-box)-4px)] border bg-base-100 text-left transition duration-150 hover:-translate-y-px hover:border-primary/60 hover:shadow-md active:translate-y-0 ${animation} ${border} ${
         compact ? 'px-2.5 py-1.5' : 'px-3 py-2.5'
       }`}
     >
+      {task.status === 'running' && (
+        // 応答中のカードの下端に、流れる光を出す
+        <span
+          aria-hidden="true"
+          className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden motion-reduce:hidden"
+        >
+          <span className="block h-full w-2/5 animate-flow bg-linear-to-r from-transparent via-info to-transparent" />
+        </span>
+      )}
       <span className="flex w-full items-center gap-1.5">
         <span className="text-[11px] text-muted">#{task.number}</span>
         <span className="min-w-0 flex-1 font-medium">{task.title}</span>

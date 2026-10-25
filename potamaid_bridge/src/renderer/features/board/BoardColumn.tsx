@@ -26,9 +26,18 @@ export function BoardColumn({
       className={`flex shrink flex-col gap-2 rounded-box bg-base-300 p-2.5 ${column.minWidthClass}`}
     >
       <h2 className="flex items-center gap-2 px-1 py-0.5 text-[13px] font-bold">
-        <StatusDot tone={column.tone} />
+        <StatusDot
+          tone={column.tone}
+          pulse={items.some((t) => t.status === 'running')}
+        />
         {column.title}
-        <span className="ml-auto font-normal text-muted">{items.length}</span>
+        {/* 数が変わったら弾ませる */}
+        <span
+          key={items.length}
+          className="ml-auto animate-pop-in font-normal text-muted"
+        >
+          {items.length}
+        </span>
       </h2>
       {items.map((task) => (
         <TaskCard
@@ -43,7 +52,7 @@ export function BoardColumn({
         />
       ))}
       {items.length === 0 && (
-        <div className="rounded-[calc(var(--radius-box)-4px)] border border-dashed border-base-content/25 p-3 text-center text-xs text-muted">
+        <div className="animate-fade-in rounded-[calc(var(--radius-box)-4px)] border border-dashed border-base-content/25 p-3 text-center text-xs text-muted">
           なし
         </div>
       )}

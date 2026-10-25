@@ -3,6 +3,7 @@
  * 確認中・完了の目標では、列の上に目標の確認の枠を出す。
  */
 import type { Goal, Task } from '../../../shared/domain';
+import { ProgressBar } from '../../components/ProgressBar';
 import { StatusBadge } from '../../components/StatusBadge';
 import { goalDisplayStatus, goalProgress } from '../../lib/selectors';
 import { GOAL_STATUS } from '../../lib/statusMeta';
@@ -28,7 +29,12 @@ export function GoalBoard({
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-[17px] font-bold">{goal.title}</h1>
           <StatusBadge meta={GOAL_STATUS[goalDisplayStatus(goal, tasks)]} />
-          <span className="text-muted">
+          <span className="flex items-center gap-2 text-muted">
+            <ProgressBar
+              percent={progress.percent}
+              label={`${goal.title} の進み具合`}
+              className="w-24"
+            />
             {progress.done} / {progress.total} 完了
           </span>
           {/* 実行の途中で計画を変える方法は仕様が未決定のため、まだ使えない */}

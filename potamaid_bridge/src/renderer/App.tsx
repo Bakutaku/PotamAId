@@ -7,6 +7,7 @@
 import { useRef } from 'react';
 import type { Approval, Consult, Goal } from '../shared/domain';
 import type { BridgeSnapshot } from '../shared/ipc';
+import logo from '../../assets/river-spirit.png';
 import { EmptyState } from './components/EmptyState';
 import { ApprovalBanner } from './features/approvals/ApprovalBanner';
 import { GoalBoard } from './features/board/GoalBoard';
@@ -51,8 +52,19 @@ function Shell() {
   useApplyTheme(snapshot?.settings.theme);
   if (!snapshot) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <span className="loading loading-spinner" aria-label="読み込み中" />
+      <div
+        role="status"
+        className="flex h-full flex-col items-center justify-center gap-3"
+      >
+        <img
+          src={logo}
+          alt=""
+          className="size-14 animate-bob [image-rendering:pixelated]"
+        />
+        <span className="flex items-center gap-2 text-muted">
+          <span className="loading loading-dots loading-xs" aria-hidden />
+          読み込み中
+        </span>
       </div>
     );
   }
@@ -82,7 +94,11 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
                 snapshot={snapshot}
                 approvals={approvals}
               />
-              <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
+              {/* 見るものが変わったら作り直し、ふわっと出す */}
+              <div
+                key={contentKey(selection)}
+                className="flex min-h-0 flex-1 animate-fade-in flex-col gap-3.5 overflow-y-auto p-4"
+              >
                 <MainContent
                   snapshot={snapshot}
                   selection={selection}
@@ -206,6 +222,24 @@ function MainContent({
         />
       );
   }
+}
+
+/**
+ * メインの領域の表示を区別する値。
+ * 目標は「計画づくり → 計画の確認 → ボード」と表示が変わるので、その段階も含める
+ */
+function contentKey({ view, goal }: Selection): string {
+  if (!view) {
+    return 'empty';
+  }
+  const stage = !goal
+    ? ''
+    : goal.status === 'planning' || goal.status === 'planFailed'
+      ? 'planning'
+      : goal.status === 'planReview'
+        ? 'planReview'
+        : 'board';
+  return `${view.kind}:${view.id}:${stage}`;
 }
 
 /** 目標・相談の AI の説明（「Codex・gpt-x・思考量 中」など） */

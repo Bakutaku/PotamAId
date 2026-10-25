@@ -13,7 +13,10 @@ export function ProgressEventList({ events }: { events: ProgressEvent[] }) {
   return (
     <ol className="flex flex-col gap-1.5">
       {events.map((event) => (
-        <li key={event.seq} className="flex items-baseline gap-2 text-muted">
+        <li
+          key={event.seq}
+          className="flex animate-fade-in items-baseline gap-2 text-muted"
+        >
           <span
             className={`w-12 shrink-0 rounded-md border px-1 text-center text-[11px] ${
               event.kind === 'error'

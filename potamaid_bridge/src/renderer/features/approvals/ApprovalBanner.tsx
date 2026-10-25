@@ -38,10 +38,16 @@ export function ApprovalBanner({
       tabIndex={-1}
       // 「承認待ちを確認」でフォーカスが移ったら開く
       onFocus={() => setCollapsed(false)}
-      className="mx-4 mt-4 flex max-h-[45%] shrink-0 flex-col rounded-box border border-warning bg-warning/12"
+      className="mx-4 mt-4 flex max-h-[45%] shrink-0 animate-glow-warning flex-col rounded-box border border-warning bg-warning/12"
     >
       <h2 className="flex items-center gap-2 px-3.5 py-2.5 text-sm font-bold text-warning-strong">
-        <Icon name="shield" size={18} className="shrink-0" />
+        {/* 承認待ちが増えるたびに、盾のアイコンを揺らして気付かせる */}
+        <Icon
+          key={approvals.length}
+          name="shield"
+          size={18}
+          className="shrink-0 animate-wiggle"
+        />
         <span className="shrink-0">承認待ち {approvals.length} 件</span>
         <span className="min-w-0 truncate text-xs font-normal text-muted">
           AI があなたの対応を待っています
@@ -56,7 +62,7 @@ export function ApprovalBanner({
           <Icon
             name="chevronDown"
             size={14}
-            className={collapsed ? '' : 'rotate-180'}
+            className={`transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
           />
         </button>
       </h2>
@@ -65,7 +71,7 @@ export function ApprovalBanner({
           {approvals.map((approval) => (
             <div
               key={approval.id}
-              className="flex flex-col gap-2 rounded-field bg-base-100 px-3 py-2.5"
+              className="flex animate-fade-in flex-col gap-2 rounded-field bg-base-100 px-3 py-2.5"
             >
               <OwnerLine snapshot={snapshot} approval={approval} />
               <ApprovalCard approval={approval} />

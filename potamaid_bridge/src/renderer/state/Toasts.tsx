@@ -39,7 +39,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toast toast-end z-50" aria-live="assertive">
         {toasts.map((toast) => (
-          <div key={toast.id} role="alert" className="alert alert-error">
+          <div
+            key={toast.id}
+            role="alert"
+            className="alert animate-toast-in alert-error shadow-lg"
+          >
             <span>{toast.message}</span>
           </div>
         ))}

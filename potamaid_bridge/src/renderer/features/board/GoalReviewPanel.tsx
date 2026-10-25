@@ -48,7 +48,7 @@ export function GoalReviewPanel({
   return (
     <section
       aria-label="目標の確認"
-      className={`flex flex-col gap-2 rounded-box border px-3.5 py-3 ${
+      className={`flex animate-fade-in flex-col gap-2 rounded-box border px-3.5 py-3 transition-colors duration-300 ${
         goal.status === 'review' && finished
           ? 'border-accent/60 bg-accent/5'
           : 'border-base-300'

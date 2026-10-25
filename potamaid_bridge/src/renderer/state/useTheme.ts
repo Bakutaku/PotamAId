@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ThemeName } from '../../shared/domain';
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -20,12 +20,23 @@ export function usePrefersDark(): boolean {
  * daisyUI のテーマの prefersdark で OS の設定に合わせる。
  */
 export function useApplyTheme(theme: ThemeName | null | undefined): void {
+  // 起動して最初に当てるときは、切り替えの動きを出さない
+  const applied = useRef(false);
   useEffect(() => {
     const root = document.documentElement;
-    if (theme) {
-      root.dataset.theme = theme;
+    const apply = () => {
+      if (theme) {
+        root.dataset.theme = theme;
+      } else {
+        delete root.dataset.theme;
+      }
+    };
+    if (applied.current) {
+      // 色を1つずつ変えるとちらつくので、画面全体を入れ替える動きにする
+      document.startViewTransition(apply);
     } else {
-      delete root.dataset.theme;
+      apply();
+      applied.current = true;
     }
   }, [theme]);
 }
