@@ -1,60 +1,79 @@
-import { app, BrowserWindow } from 'electron';
+/**
+ * Electron の main プロセスの入口。
+ *
+ * Bridge の本体（BridgeCore）を作り、ウィンドウ・トレイ・IPC・終了の処理を組み立てる。
+ */
+import { app } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
+import { BridgeCore } from '../core/BridgeCore';
+import { CodexProvider } from '../core/providers/codex/CodexProvider';
+import type { UiCommand } from '../shared/ipc';
+import { registerIpc } from './ipc';
+import { QuitController } from './quit';
+import { BridgeTray } from './tray';
+import { MainWindow } from './window';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
 }
 
-const createWindow = () => {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true, // セキュリティのため有効化
-      nodeIntegration: false, // セキュリティのため無効化
-    },
+// Bridge は1つだけ動かす。2つ目を起動したら、動いている方のウィンドウを開く
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  void app.whenReady().then(startBridge);
+}
+
+function startBridge(): void {
+  const core = new BridgeCore({
+    databasePath: path.join(app.getPath('userData'), 'bridge.sqlite'),
+    createProviders: (getSettings) => [
+      new CodexProvider({
+        getSettings,
+        clientVersion: app.getVersion(),
+        onLog: (message) => console.log(message),
+      }),
+    ],
+    onError: (error) => console.error(error),
   });
 
-  // and load the index.html of the app.
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
+  let tray: BridgeTray | null = null;
+  const window = new MainWindow(() => tray?.notifyHidden());
+  const ipc = registerIpc(core, () => window.current);
 
-  // Open the DevTools.
-  //mainWindow.webContents.openDevTools();
-};
+  const showWindowWith = (command: UiCommand) => {
+    const win = window.show();
+    // 画面の読み込みが終わってから送る
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', () =>
+        ipc.send('uiCommand', command),
+      );
+    } else {
+      ipc.send('uiCommand', command);
+    }
+  };
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  createWindow();
+  const quit = new QuitController(core, () => {
+    window.prepareToQuit();
+    tray?.dispose();
+    ipc.dispose();
+  });
 
+  tray = new BridgeTray(core, {
+    showWindow: () => window.show(),
+    showWindowWith,
+    requestQuit: () => void quit.requestQuit(),
+  });
+
+  app.on('second-instance', () => window.show());
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
-});
+  app.on('activate', () => window.show());
+  // ウィンドウを閉じてもトレイで動き続けるため、ここでは終了しない
+  app.on('window-all-closed', () => undefined);
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+  core.start();
+  window.show();
+}

@@ -10,6 +10,10 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // 拡張子は OS ごとに .ico / .icns が選ばれる
+    icon: 'assets/icon',
+    // トレイとウィンドウのアイコンは、実行時に resources/assets から読む
+    extraResource: ['assets'],
   },
   rebuildConfig: {},
   makers: [

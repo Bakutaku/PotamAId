@@ -1,0 +1,110 @@
+import type { Goal, GoalStatus, ProviderId } from '../../../shared/domain';
+import type { Database } from '../Database';
+
+interface GoalRow {
+  id: string;
+  project_id: string;
+  title: string;
+  text: string;
+  status: string;
+  plan_summary: string | null;
+  plan_error: string | null;
+  plan_session_id: string | null;
+  provider_id: string;
+  model: string | null;
+  effort: string | null;
+  created_at: number;
+}
+
+const toGoal = (row: GoalRow): Goal => ({
+  id: row.id,
+  projectId: row.project_id,
+  title: row.title,
+  text: row.text,
+  status: row.status as GoalStatus,
+  planSummary: row.plan_summary,
+  planError: row.plan_error,
+  providerId: row.provider_id as ProviderId,
+  model: row.model,
+  effort: row.effort,
+  createdAt: row.created_at,
+});
+
+/** 目標の保存と読み込み */
+export class GoalRepository {
+  constructor(private readonly db: Database) {}
+
+  /** すべての目標を作成順に返す */
+  list(): Goal[] {
+    return this.db
+      .all<GoalRow>('SELECT * FROM goals ORDER BY created_at')
+      .map(toGoal);
+  }
+
+  find(id: string): Goal | undefined {
+    const row = this.db.get<GoalRow>('SELECT * FROM goals WHERE id = ?', id);
+    return row && toGoal(row);
+  }
+
+  /** 見つからなければ例外（画面からの操作で、消えた目標を指定された場合など） */
+  get(id: string): Goal {
+    const goal = this.find(id);
+    if (!goal) {
+      throw new Error('目標が見つかりません');
+    }
+    return goal;
+  }
+
+  insert(goal: Goal): void {
+    this.db.run(
+      'INSERT INTO goals (id, project_id, title, text, status, plan_summary, plan_error, provider_id, model, effort, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      goal.id,
+      goal.projectId,
+      goal.title,
+      goal.text,
+      goal.status,
+      goal.planSummary,
+      goal.planError,
+      goal.providerId,
+      goal.model,
+      goal.effort,
+      goal.createdAt,
+    );
+  }
+
+  setStatus(id: string, status: GoalStatus, planError: string | null = null) {
+    this.db.run(
+      'UPDATE goals SET status = ?, plan_error = ? WHERE id = ?',
+      status,
+      planError,
+      id,
+    );
+  }
+
+  /** 計画ができたときに、題名と要約を保存する */
+  setPlan(id: string, title: string, summary: string): void {
+    this.db.run(
+      'UPDATE goals SET title = ?, plan_summary = ? WHERE id = ?',
+      title,
+      summary,
+      id,
+    );
+  }
+
+  getPlanSessionId(id: string): string | null {
+    return (
+      this.db.get<{ plan_session_id: string | null }>(
+        'SELECT plan_session_id FROM goals WHERE id = ?',
+        id,
+      )?.plan_session_id ?? null
+    );
+  }
+
+  setPlanSessionId(id: string, sessionId: string | null): void {
+    this.db.run(
+      'UPDATE goals SET plan_session_id = ? WHERE id = ?',
+      sessionId,
+      id,
+    );
+  }
+}

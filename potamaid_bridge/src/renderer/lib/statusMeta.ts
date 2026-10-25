@@ -1,0 +1,64 @@
+/**
+ * 状態の表示名と色（モックの対応表に合わせる）。
+ */
+import type {
+  ConsultStatus,
+  GoalStatus,
+  ProgressKind,
+  ProviderState,
+  TaskStatus,
+} from '../../shared/domain';
+import type { Tone } from './tone';
+
+export interface StatusMeta {
+  label: string;
+  tone: Tone;
+}
+
+export const TASK_STATUS: Record<TaskStatus, StatusMeta> = {
+  todo: { label: '未着手', tone: 'neutral' },
+  running: { label: '応答中', tone: 'info' },
+  approval: { label: '承認待ち', tone: 'warning' },
+  review: { label: '確認待ち', tone: 'accent' },
+  done: { label: '完了', tone: 'success' },
+  failed: { label: '失敗', tone: 'error' },
+};
+
+/** 目標の表示上の状態。すべてのタスクが完了した目標は「完了」と表示する */
+export type GoalDisplayStatus = GoalStatus | 'done';
+
+export const GOAL_STATUS: Record<GoalDisplayStatus, StatusMeta> = {
+  planning: { label: '計画中', tone: 'info' },
+  planReview: { label: '計画の確認待ち', tone: 'warning' },
+  planFailed: { label: '計画の失敗', tone: 'error' },
+  active: { label: '進行中', tone: 'info' },
+  done: { label: '完了', tone: 'success' },
+};
+
+export const CONSULT_STATUS: Record<ConsultStatus, StatusMeta> = {
+  idle: { label: '', tone: 'neutral' },
+  queued: { label: '順番待ち', tone: 'neutral' },
+  running: { label: '応答中', tone: 'info' },
+  failed: { label: '失敗', tone: 'error' },
+};
+
+export const PROVIDER_STATE_TONE: Record<ProviderState, Tone> = {
+  checking: 'neutral',
+  ready: 'success',
+  notLoggedIn: 'warning',
+  unavailable: 'error',
+  notSupported: 'neutral',
+};
+
+/** 途中経過の一覧の左に出す短い名前 */
+export const PROGRESS_TAG: Record<ProgressKind, string> = {
+  user: '指示',
+  agent: '発言',
+  reasoning: '思考',
+  command: '実行',
+  fileChange: '編集',
+  mcp: 'MCP',
+  webSearch: '検索',
+  system: 'Bridge',
+  error: 'エラー',
+};

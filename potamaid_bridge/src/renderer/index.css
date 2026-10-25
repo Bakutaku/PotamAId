@@ -1,8 +1,148 @@
-body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
-  margin: auto;
-  max-width: 38rem;
-  padding: 2rem;
+/*
+ * Bridge の画面のスタイル。
+ * Tailwind CSS v4 と daisyUI 5 を使い、色はモックに合わせた独自テーマ
+ * potamaid-light / potamaid-dark で定義する。
+ */
+@import 'tailwindcss';
+
+/* フォントはオフラインでも表示できるように同梱する */
+@import '@fontsource/noto-sans-jp/400.css';
+@import '@fontsource/noto-sans-jp/500.css';
+@import '@fontsource/noto-sans-jp/700.css';
+@import '@fontsource/dotgothic16/400.css';
+
+/* daisyUI の組み込みテーマは使わず、下の独自テーマだけを読み込む */
+@plugin 'daisyui' {
+  themes: false;
+}
+
+@plugin 'daisyui/theme' {
+  name: 'potamaid-light';
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f3f7fa;
+  --color-base-300: #e2e9f0;
+  --color-base-content: #16293b;
+  --color-primary: #1f78c8;
+  --color-primary-content: #ffffff;
+  --color-secondary: #4f8a2e;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0e3a66;
+  --color-accent-content: #ffffff;
+  --color-neutral: #23384d;
+  --color-neutral-content: #f3f7fa;
+  --color-info: #2b86d6;
+  --color-info-content: #ffffff;
+  --color-success: #4f8a2e;
+  --color-success-content: #ffffff;
+  --color-warning: #e8a317;
+  --color-warning-content: #3a2600;
+  --color-error: #d2483f;
+  --color-error-content: #ffffff;
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin 'daisyui/theme' {
+  name: 'potamaid-dark';
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #15212d;
+  --color-base-200: #101a24;
+  --color-base-300: #24384b;
+  --color-base-content: #dce7f1;
+  --color-primary: #4aa3f0;
+  --color-primary-content: #06243f;
+  --color-secondary: #7db65a;
+  --color-secondary-content: #102308;
+  --color-accent: #9cc9f2;
+  --color-accent-content: #0b2238;
+  --color-neutral: #2a3b4c;
+  --color-neutral-content: #dce7f1;
+  --color-info: #4aa3f0;
+  --color-info-content: #06243f;
+  --color-success: #7db65a;
+  --color-success-content: #102308;
+  --color-warning: #f0b43c;
+  --color-warning-content: #2a1b00;
+  --color-error: #f07167;
+  --color-error-content: #2a0705;
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@theme inline {
+  /* 補足の文字に使う、本文と背景の中間の色（モックの --pa-muted） */
+  --color-muted: color-mix(
+    in oklab,
+    var(--color-base-content) 66%,
+    var(--color-base-100)
+  );
+  /*
+   * 状態の色を文字に使うときの、読みやすく濃くした色（モックの color-mix に合わせる）。
+   * warning などはそのままだと明るい背景で読みにくいため
+   */
+  --color-info-strong: color-mix(
+    in oklab,
+    var(--color-info) 62%,
+    var(--color-base-content)
+  );
+  --color-warning-strong: color-mix(
+    in oklab,
+    var(--color-warning) 45%,
+    var(--color-base-content)
+  );
+  --color-accent-strong: color-mix(
+    in oklab,
+    var(--color-accent) 62%,
+    var(--color-base-content)
+  );
+  --color-success-strong: color-mix(
+    in oklab,
+    var(--color-success) 60%,
+    var(--color-base-content)
+  );
+  --color-error-strong: color-mix(
+    in oklab,
+    var(--color-error) 75%,
+    var(--color-base-content)
+  );
+  --color-primary-strong: color-mix(
+    in oklab,
+    var(--color-primary) 70%,
+    var(--color-base-content)
+  );
+  --font-sans: 'Noto Sans JP', system-ui, sans-serif;
+  /* ロゴの文字に使うドット絵風のフォント */
+  --font-pixel: 'DotGothic16', 'Noto Sans JP', sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-base-200 text-base-content font-sans;
+    font-size: 13px;
+    line-height: 1.6;
+  }
 }

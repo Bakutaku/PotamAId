@@ -19,7 +19,9 @@
     "release": "electron-forge release",
     "lint": "oxlint && oxfmt --check",
     "lint:fix": "oxlint --fix && oxfmt --write",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "gen:codex": "codex app-server generate-ts --out src/core/providers/codex/protocol"
   },
   "devDependencies": {
     "@electron-forge/cli": "^8.0.1",
@@ -31,19 +33,28 @@
     "@electron-forge/plugin-fuses": "^8.0.1",
     "@electron-forge/plugin-vite": "^8.0.1",
     "@electron/fuses": "^2.1.3",
+    "@fontsource/dotgothic16": "^5.3.1",
+    "@fontsource/noto-sans-jp": "^5.3.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "daisyui": "^5.7.50",
     "electron": "45.0.0",
     "oxfmt": "^0.41.0",
     "oxlint": "^1.89.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }
