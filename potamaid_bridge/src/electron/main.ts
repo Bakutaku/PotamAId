@@ -29,10 +29,13 @@ if (!app.requestSingleInstanceLock()) {
 
 function startBridge(): void {
   // Windows ではアプリの ID がないとデスクトップ通知が出ない。
-  // パッケージでは Squirrel のショートカットと同じ ID、開発中は実行ファイルのパスを使う
+  // パッケージでは Squirrel のショートカットと同じ ID を使う。
+  // 開発中に electron.exe のパスを ID にすると、タスクバーが Electron のアイコンになるため、専用の ID にする
   if (process.platform === 'win32') {
     app.setAppUserModelId(
-      app.isPackaged ? 'com.squirrel.potamaid.potamaid' : process.execPath,
+      app.isPackaged
+        ? 'com.squirrel.potamaid.potamaid'
+        : 'com.potamaid.bridge.dev',
     );
   }
 
