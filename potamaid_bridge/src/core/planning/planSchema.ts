@@ -4,6 +4,7 @@
  * 計画の作成では、AI の最後の発言を {@link PLAN_OUTPUT_SCHEMA} の JSON にさせ、
  * {@link parsePlan} で検証してからタスクとして保存する。
  */
+import type { TaskKind } from '../../shared/domain';
 import { checkTaskGraph, sortByDependencies } from './taskGraph';
 
 /** AI が返す計画 */
@@ -20,8 +21,11 @@ export interface PlanTaskOutput {
   key: string;
   title: string;
   description: string;
+  kind: TaskKind;
   dependsOn: string[];
 }
+
+const TASK_KINDS: readonly TaskKind[] = ['edit', 'investigate'];
 
 /**
  * turn/start の outputSchema に渡す JSON Schema。
@@ -45,13 +49,20 @@ export const PLAN_OUTPUT_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['key', 'title', 'description', 'dependsOn'],
+        required: ['key', 'title', 'description', 'kind', 'dependsOn'],
         properties: {
           key: { type: 'string', description: 't1, t2 のような識別子' },
           title: { type: 'string', description: 'タスクの短い題名' },
           description: {
             type: 'string',
-            description: '実装する内容と、変更するファイルの見込み',
+            description:
+              '実装する内容と変更するファイルの見込み（調査タスクは、調べる内容と後のタスクに渡す結果）',
+          },
+          kind: {
+            type: 'string',
+            enum: TASK_KINDS,
+            description:
+              'edit: ファイルを編集するタスク。investigate: 読み取り専用で調べるだけのタスク',
           },
           dependsOn: {
             type: 'array',
@@ -139,6 +150,7 @@ function isPlanTask(value: unknown): value is PlanTaskOutput {
     typeof task.key === 'string' &&
     typeof task.title === 'string' &&
     typeof task.description === 'string' &&
+    TASK_KINDS.includes(task.kind as TaskKind) &&
     Array.isArray(task.dependsOn) &&
     task.dependsOn.every((d) => typeof d === 'string')
   );

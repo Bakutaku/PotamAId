@@ -90,7 +90,7 @@ export function ConsultView({
         <InlineApprovals approvals={approvals} />
         {consult.status === 'running' && !streaming && <RunningIndicator />}
         {consult.status === 'queued' && (
-          <RunningIndicator label="順番待ちです。計画・相談の実行枠が空くと始めます" />
+          <RunningIndicator label="順番待ちです。読み取り専用の実行枠が空くと始めます" />
         )}
         <div ref={bottomRef} />
       </div>

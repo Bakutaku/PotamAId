@@ -1,7 +1,7 @@
 import type { Task } from '../../../shared/domain';
 import { StatusBadge } from '../../components/StatusBadge';
 import { describeTask } from '../../lib/selectors';
-import { TASK_STATUS } from '../../lib/statusMeta';
+import { INVESTIGATE_META, TASK_STATUS } from '../../lib/statusMeta';
 
 /** ボードのタスクのカード。選ぶと右に詳細を開く */
 export function TaskCard({
@@ -36,6 +36,7 @@ export function TaskCard({
       <span className="flex w-full items-center gap-1.5">
         <span className="text-[11px] text-muted">#{task.number}</span>
         <span className="min-w-0 flex-1 font-medium">{task.title}</span>
+        {task.kind === 'investigate' && <StatusBadge meta={INVESTIGATE_META} />}
         <StatusBadge meta={TASK_STATUS[task.status]} />
       </span>
       {subtitle && (

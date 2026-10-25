@@ -20,6 +20,7 @@ const settings: Settings = {
   codexEffort: '',
   requestTimeoutSeconds: 2,
   turnIdleTimeoutMinutes: 1,
+  desktopNotifications: false,
 };
 const turnData = (id: string, status: Turn['status'] = 'completed'): Turn => ({
   id,
@@ -530,12 +531,14 @@ describe('CodexProvider のターンの分離と停止', () => {
                   key: 'a',
                   title: 'first',
                   description: 'first',
+                  kind: 'edit',
                   dependsOn: [],
                 },
                 {
                   key: 'b',
                   title: 'second',
                   description: 'second',
+                  kind: 'edit',
                   dependsOn: [],
                 },
               ],

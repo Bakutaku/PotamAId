@@ -52,6 +52,7 @@ export class PlanRunner {
       if (request.kind === 'replan' && sessionId) {
         session = await provider.resumeSession(sessionId, options);
         prompt = buildReplanPrompt(
+          goal,
           request.instruction,
           store.tasks.listByGoal(goalId),
         );
@@ -61,6 +62,7 @@ export class PlanRunner {
         prompt =
           request.kind === 'replan'
             ? buildReplanPrompt(
+                goal,
                 request.instruction,
                 store.tasks.listByGoal(goalId),
               )
@@ -136,7 +138,9 @@ export class PlanRunner {
             number: index + 1,
             title: t.title,
             description: t.description,
+            kind: t.kind,
             status: 'todo',
+            paused: false,
             latest: null,
             result: null,
             needsGameRestart: false,

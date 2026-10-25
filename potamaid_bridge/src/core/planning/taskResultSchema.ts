@@ -29,6 +29,20 @@ export const TASK_RESULT_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/** 調査タスクの結果。調べた結果は、依存するタスクの指示に添える */
+export const INVESTIGATE_RESULT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary'],
+  properties: {
+    summary: {
+      type: 'string',
+      description:
+        '調べて分かったこと（関係するファイル・クラス・手順など）。後のタスクがそのまま使えるように具体的に書く',
+    },
+  },
+};
+
 /** AI の最後の発言を結果として読む。JSON でなければ、発言をそのまま要約として扱う */
 export function parseTaskResult(text: string | null): TaskResultOutput {
   if (!text) {

@@ -45,7 +45,7 @@ export function GoalPlanningView({
       <ProgressEventList events={progress} />
       <InlineApprovals approvals={approvals} />
       {!failed && (
-        // 計画・相談の実行枠が空いていなければ、順番待ちのあとに始まる
+        // 読み取り専用の実行枠が空いていなければ、順番待ちのあとに始まる
         <RunningIndicator label="AI がコードを読んで計画を作っています…" />
       )}
       {failed && (

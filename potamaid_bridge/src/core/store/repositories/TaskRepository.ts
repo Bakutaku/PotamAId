@@ -1,4 +1,4 @@
-import type { Task, TaskStatus } from '../../../shared/domain';
+import type { Task, TaskKind, TaskStatus } from '../../../shared/domain';
 import type { Database } from '../Database';
 
 interface TaskRow {
@@ -7,7 +7,9 @@ interface TaskRow {
   number: number;
   title: string;
   description: string;
+  kind: string;
   status: string;
+  paused: number;
   session_id: string | null;
   latest: string | null;
   result: string | null;
@@ -34,7 +36,9 @@ export type TaskUpdate = Partial<
     Task,
     | 'title'
     | 'description'
+    | 'kind'
     | 'status'
+    | 'paused'
     | 'latest'
     | 'result'
     | 'needsGameRestart'
@@ -48,7 +52,9 @@ export type TaskUpdate = Partial<
 const COLUMNS: Record<keyof TaskUpdate, string> = {
   title: 'title',
   description: 'description',
+  kind: 'kind',
   status: 'status',
+  paused: 'paused',
   latest: 'latest',
   result: 'result',
   needsGameRestart: 'needs_game_restart',
@@ -115,14 +121,16 @@ export class TaskRepository {
   insert(task: TaskRecord, dependsOn: string[]): void {
     this.db.transaction(() => {
       this.db.run(
-        `INSERT INTO tasks (id, goal_id, number, title, description, status, latest, result, needs_game_restart, error, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, goal_id, number, title, description, kind, status, paused, latest, result, needs_game_restart, error, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         task.id,
         task.goalId,
         task.number,
         task.title,
         task.description,
+        task.kind,
         task.status,
+        task.paused ? 1 : 0,
         task.latest,
         task.result,
         task.needsGameRestart ? 1 : 0,
@@ -231,7 +239,9 @@ export class TaskRepository {
       number: row.number,
       title: row.title,
       description: row.description,
+      kind: row.kind as TaskKind,
       status: row.status as TaskStatus,
+      paused: row.paused === 1,
       latest: row.latest,
       result: row.result,
       needsGameRestart: row.needs_game_restart === 1,

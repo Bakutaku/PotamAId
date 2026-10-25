@@ -22,7 +22,12 @@ import { SettingsDialog } from './features/settings/SettingsDialog';
 import { Sidebar } from './features/sidebar/Sidebar';
 import { TaskDetail } from './features/task/TaskDetail';
 import { describeRun } from './lib/runOptions';
-import { goalTasks, ownerApprovals, projectApprovals } from './lib/selectors';
+import {
+  goalTasks,
+  isGoalStarted,
+  ownerApprovals,
+  projectApprovals,
+} from './lib/selectors';
 import { useBridgeSnapshot } from './state/snapshotStore';
 import { ToastProvider } from './state/Toasts';
 import { UiStateProvider, useUiState } from './state/UiState';
@@ -86,7 +91,7 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
             <NoProjects />
           )}
         </main>
-        {goal && task && goal.status === 'active' && (
+        {goal && task && isGoalStarted(goal) && (
           <TaskDetail
             goal={goal}
             task={task}
@@ -186,6 +191,8 @@ function MainContent({
     case 'planReview':
       return <PlanReview goal={goal} tasks={tasks} />;
     case 'active':
+    case 'review':
+    case 'done':
       return (
         <GoalBoard
           goal={goal}

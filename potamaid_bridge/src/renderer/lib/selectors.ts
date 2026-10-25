@@ -8,6 +8,7 @@ import type {
   ProgressOwner,
   Task,
 } from '../../shared/domain';
+import { isGoalWorkFinished, isTaskWorkFinished } from '../../shared/goals';
 import type { BridgeSnapshot } from '../../shared/ipc';
 import type { GoalDisplayStatus } from './statusMeta';
 
@@ -43,14 +44,19 @@ export function goalDisplayStatus(
   goal: Goal,
   tasks: Task[],
 ): GoalDisplayStatus {
-  if (
-    goal.status === 'active' &&
-    tasks.length > 0 &&
-    tasks.every((t) => t.status === 'done')
-  ) {
-    return 'done';
+  if (goal.status === 'review' && !isGoalWorkFinished(tasks)) {
+    return 'fixing';
   }
   return goal.status;
+}
+
+/** 計画を承認したあとの目標か（ボードとタスクの詳細を出す） */
+export function isGoalStarted(goal: Goal): boolean {
+  return (
+    goal.status === 'active' ||
+    goal.status === 'review' ||
+    goal.status === 'done'
+  );
 }
 
 export interface GoalProgress {
@@ -92,19 +98,30 @@ export function dependencyText(task: Task, tasks: Task[]): string {
  * 未着手のタスクは、依存先の完了待ちか、次に実行するかを示す。
  */
 export function describeTask(task: Task, tasks: Task[]): string {
+  if (task.paused) {
+    return task.status === 'running' || task.status === 'approval'
+      ? '中止しています…'
+      : '停止中（再開待ち）';
+  }
   switch (task.status) {
     case 'todo': {
-      const done = new Set(
-        tasks.filter((t) => t.status === 'done').map((t) => t.id),
-      );
+      const done = new Set(tasks.filter(isTaskWorkFinished).map((t) => t.id));
       const waiting = tasks.filter(
         (t) => task.dependsOn.includes(t.id) && !done.has(t.id),
       );
       if (waiting.length > 0) {
         return `${waiting.map((t) => `#${t.number}`).join('・')} の完了後`;
       }
+      // 調査タスクは並行して実行するため、編集タスクの中での順番だけを示す
+      if (task.kind === 'investigate') {
+        return '実行できます（空きを待っています）';
+      }
       const firstRunnable = tasks.find(
-        (t) => t.status === 'todo' && t.dependsOn.every((dep) => done.has(dep)),
+        (t) =>
+          t.kind === 'edit' &&
+          !t.paused &&
+          t.status === 'todo' &&
+          t.dependsOn.every((dep) => done.has(dep)),
       );
       return firstRunnable?.id === task.id
         ? '次に実行'
@@ -114,14 +131,12 @@ export function describeTask(task: Task, tasks: Task[]): string {
       return task.latest ?? '作業中…';
     case 'approval':
       return task.latest ?? '承認待ち';
-    case 'review':
-      return task.pendingInstructions > 0
-        ? `追加の指示 ${task.pendingInstructions} 件を順番待ち`
-        : '動作を確かめてください';
     case 'failed':
       return task.error ?? '失敗しました';
     case 'done':
-      return '';
+      return task.pendingInstructions > 0
+        ? `追加の指示 ${task.pendingInstructions} 件を順番待ち`
+        : '';
   }
 }
 

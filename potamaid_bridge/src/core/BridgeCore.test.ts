@@ -8,6 +8,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderStatus } from '../shared/domain';
 import { BridgeCore } from './BridgeCore';
+import type { BridgeNotification } from './runners/RunnerContext';
 import type {
   AiProvider,
   AiSession,
@@ -82,8 +83,20 @@ const planJson = JSON.stringify({
   goalTitle: '粉砕機を追加する',
   summary: 'ブロックと処理に分けます',
   tasks: [
-    { key: 't1', title: 'ブロック', description: '登録する', dependsOn: [] },
-    { key: 't2', title: '処理', description: '粉砕する', dependsOn: ['t1'] },
+    {
+      key: 't1',
+      title: 'ブロック',
+      description: '登録する',
+      kind: 'edit',
+      dependsOn: [],
+    },
+    {
+      key: 't2',
+      title: '処理',
+      description: '粉砕する',
+      kind: 'edit',
+      dependsOn: ['t1'],
+    },
   ],
 });
 
@@ -118,6 +131,7 @@ describe('BridgeCore', () => {
   let dir: string;
   let provider: FakeProvider;
   let core: BridgeCore;
+  let notifications: BridgeNotification[];
 
   beforeEach(() => {
     dir = mkdtempSync(path.join(tmpdir(), 'potamaid-bridge-'));
@@ -126,6 +140,8 @@ describe('BridgeCore', () => {
       databasePath: ':memory:',
       createProviders: () => [provider],
     });
+    notifications = [];
+    core.events.on('notification', (n) => notifications.push(n));
   });
 
   afterEach(async () => {
@@ -135,6 +151,9 @@ describe('BridgeCore', () => {
 
   const taskByNumber = (n: number) =>
     core.snapshot().tasks.find((t) => t.number === n);
+  /** 目標の状態（指定しなければ最初の目標） */
+  const goalStatus = (goalId?: string) =>
+    core.snapshot().goals.find((g) => !goalId || g.id === goalId)?.status;
 
   /** 計画の承認まで進める */
   async function approvedGoal() {
@@ -180,60 +199,379 @@ describe('BridgeCore', () => {
     // 最初のターンには目標と計画を添える
     expect(provider.inputs[1]?.text).toContain('粉砕機を追加したい');
 
+    // タスクごとの確認は待たずに、次のタスクに進む
+    provider.scripts.push(async () => completed(resultJson(false)));
     await core.respondApproval(core.snapshot().approvals[0].id, {
       decision: 'allow',
     });
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
-    expect(taskByNumber(1)?.needsGameRestart).toBe(true);
-    // 確認待ちの間は、次のタスクを始めない
-    expect(taskByNumber(2)?.status).toBe('todo');
-
-    provider.scripts.push(async () => completed(resultJson(false)));
-    await core.markTaskDone(taskByNumber(1)!.id);
-    await vi.waitFor(() => expect(taskByNumber(2)?.status).toBe('review'));
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
     expect(taskByNumber(1)?.status).toBe('done');
+    expect(taskByNumber(1)?.needsGameRestart).toBe(true);
+    expect(taskByNumber(2)?.status).toBe('done');
+    // 依存先の結果を、次のタスクの指示に添える
+    expect(provider.inputs[2]?.text).toContain('実装しました');
+
+    // 承認待ちと、目標の確認待ち（再起動が必要なタスクをまとめて）を知らせる
+    expect(notifications.map((n) => n.kind)).toEqual([
+      'approval',
+      'goalReview',
+    ]);
+    // 承認待ちの通知からは、その対象modの承認待ちを開く
+    expect(notifications[0]?.target).toEqual({
+      type: 'showApprovals',
+      projectId: goal.projectId,
+    });
+    expect(notifications[1]?.body).toContain('#1');
+    expect(notifications[1]?.target).toEqual({
+      type: 'showGoal',
+      projectId: goal.projectId,
+      goalId: goal.id,
+      taskId: null,
+    });
+
+    await core.markGoalDone(goal.id);
+    expect(goalStatus()).toBe('done');
   });
 
-  it('中止したタスクは未着手に戻り、セッションを作り直す', async () => {
+  it('調査タスクは読み取り専用で並行して実行し、結果を依存するタスクに渡す', async () => {
+    const project = await core.addProject(dir);
+    provider.scripts.push(async () =>
+      completed(
+        JSON.stringify({
+          goalTitle: '粉砕機',
+          summary: '調べてから作ります',
+          tasks: [
+            {
+              key: 'a',
+              title: '既存の機械',
+              description: '',
+              kind: 'investigate',
+              dependsOn: [],
+            },
+            {
+              key: 'b',
+              title: 'レシピ',
+              description: '',
+              kind: 'investigate',
+              dependsOn: [],
+            },
+            {
+              key: 'c',
+              title: '実装',
+              description: '',
+              kind: 'edit',
+              dependsOn: ['a', 'b'],
+            },
+          ],
+        }),
+      ),
+    );
+    const goal = await core.createGoal(project.id, '粉砕機', DEFAULT_RUN);
+    await vi.waitFor(() => expect(goalStatus()).toBe('planReview'));
+    expect(taskByNumber(1)?.kind).toBe('investigate');
+
+    // 2件の調査が同時に動いていることを確かめてから終わらせる
+    const finishers: (() => void)[] = [];
+    const investigating: TurnScript = ({ input }) =>
+      new Promise((resolve) => {
+        finishers.push(() =>
+          resolve(
+            completed(
+              JSON.stringify({
+                summary: input.text.includes('# 今回調べるタスク\n#1')
+                  ? '機械は Machine.java'
+                  : 'レシピは recipes/',
+              }),
+            ),
+          ),
+        );
+      });
+    provider.scripts.push(investigating, investigating);
+    provider.scripts.push(async () => completed(resultJson(false)));
+    await core.approvePlan(goal.id);
+
+    await vi.waitFor(() => expect(finishers).toHaveLength(2));
+    expect(core.snapshot().runs[project.id]).toMatchObject({
+      edit: 0,
+      readOnly: 2,
+    });
+    expect(provider.sessions.slice(1, 3).map((s) => s.access)).toEqual([
+      'readOnly',
+      'readOnly',
+    ]);
+    finishers.forEach((finish) => finish());
+
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    expect(provider.sessions[3]?.access).toBe('workspaceWrite');
+    expect(provider.inputs[3]?.text).toContain('機械は Machine.java');
+    expect(provider.inputs[3]?.text).toContain('レシピは recipes/');
+  });
+
+  it('確認中の目標がある間は、別の目標の編集タスクを始めない', async () => {
+    const { goal: first } = await reviewedGoal();
+    provider.scripts.push(async () => completed(planJson));
+    const second = await core.createGoal(
+      first.projectId,
+      '別の目標',
+      DEFAULT_RUN,
+    );
+    await vi.waitFor(() => expect(goalStatus(second.id)).toBe('planReview'));
+    await core.approvePlan(second.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const secondTasks = () =>
+      core.snapshot().tasks.filter((t) => t.goalId === second.id);
+    expect(secondTasks().map((t) => t.status)).toEqual(['todo', 'todo']);
+
+    // 完了にすると、別の目標の編集タスクを始める
+    provider.scripts.push(
+      async () => completed(resultJson(false)),
+      async () => completed(resultJson(false)),
+    );
+    await core.markGoalDone(first.id);
+    await vi.waitFor(() => expect(goalStatus(second.id)).toBe('review'));
+  });
+
+  it('目標への修正の指示は、修正のタスクを足して実行し、終わったらもう一度知らせる', async () => {
+    const { goal } = await reviewedGoal();
+    await core.markGoalDone(goal.id);
+    notifications.length = 0;
+
+    provider.scripts.push(async () => completed(resultJson(true)));
+    await core.sendGoalInstruction(goal.id, '鉄鉱石が2倍にならない');
+    // 完了にした目標は、確認中に戻る
+    expect(goalStatus()).toBe('review');
+    const fix = taskByNumber(3);
+    expect(fix?.title).toContain('修正');
+    expect(fix?.dependsOn).toHaveLength(2);
+
+    await vi.waitFor(() => expect(taskByNumber(3)?.status).toBe('done'));
+    expect(provider.sessions).toHaveLength(4);
+    expect(provider.inputs.at(-1)?.text).toContain('鉄鉱石が2倍にならない');
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.title).toContain('修正が終わりました');
+    // 再起動が必要なのは、この修正の区切りのタスクだけ
+    expect(notifications[0]?.body).toContain('#3');
+  });
+
+  it('タスクの失敗を知らせ、確認待ちにはしない', async () => {
+    const { goal } = await approvedGoal();
+    provider.scripts.push(async () => ({
+      status: 'failed',
+      finalMessage: null,
+      error: 'ビルドに失敗',
+    }));
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('failed'));
+    expect(goalStatus()).toBe('active');
+    expect(notifications).toEqual([
+      expect.objectContaining({ kind: 'taskFailed', body: 'ビルドに失敗' }),
+    ]);
+    await expect(core.markGoalDone(goal.id)).rejects.toThrow();
+  });
+
+  it('中止したタスクは手動で再開するまで未着手のまま停止する', async () => {
     const { goal } = await approvedGoal();
     provider.scripts.push(untilCancelled);
     await core.approvePlan(goal.id);
     await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('running'));
 
-    // 中止したあとは、もう一度順番が回ってきて新しいセッションで始まる
-    provider.scripts.push(untilCancelled);
     await core.cancelTask(taskByNumber(1)!.id);
-    await vi.waitFor(() => expect(provider.sessions).toHaveLength(3));
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('todo'));
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(provider.sessions).toHaveLength(2);
+    expect(taskByNumber(1)?.paused).toBe(true);
     const events = await core.getProgressEvents({
       type: 'task',
       id: taskByNumber(1)!.id,
     });
-    expect(events.some((e) => e.text.includes('未着手に戻しました'))).toBe(
+    expect(events.some((e) => e.text.includes('再開するまで停止します'))).toBe(
       true,
     );
+    provider.scripts.push(untilCancelled);
+    await core.resumeTask(taskByNumber(1)!.id);
+    await vi.waitFor(() => expect(provider.sessions).toHaveLength(3));
+    expect(taskByNumber(1)?.paused).toBe(false);
+    expect(taskByNumber(1)?.status).toBe('running');
+    expect(provider.inputs).toHaveLength(3);
+    await core.cancelTask(taskByNumber(1)!.id);
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
   });
 
-  it('確認待ちのタスクへの追加の指示を、同じセッションで実行する', async () => {
-    const { goal } = await approvedGoal();
-    provider.scripts.push(async () => completed(resultJson(false)));
+  it('すべて中止すると実行中・未着手の編集と調査タスクを自動で開始しない', async () => {
+    const { project, goal } = await approvedGoal();
+    await core.updateProject(project.id, { readOnlyConcurrency: 1 });
+    for (let i = 0; i < 2; i++) {
+      await core.addPlanTask(goal.id, {
+        title: `調査${i}`,
+        description: '調べる',
+        kind: 'investigate',
+        dependsOn: [],
+      });
+    }
+    provider.scripts.push(untilCancelled, untilCancelled);
     await core.approvePlan(goal.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(provider.inputs).toHaveLength(3));
+
+    await core.cancelAll();
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(
+      core.snapshot().tasks.every((t) => t.status === 'todo' && t.paused),
+    ).toBe(true);
+    expect(provider.sessions).toHaveLength(3);
+
+    // 設定変更でスケジューラを動かしても停止したまま。
+    await core.updateProject(project.id, { readOnlyConcurrency: 2 });
+    expect(provider.sessions).toHaveLength(3);
+    provider.scripts.push(untilCancelled);
+    await core.resumeTask(taskByNumber(3)!.id);
+    await vi.waitFor(() => expect(taskByNumber(3)?.status).toBe('running'));
+    expect(taskByNumber(1)?.status).toBe('todo');
+    expect(taskByNumber(4)?.status).toBe('todo');
+    await core.cancelAll();
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+  });
+
+  it('中止と完了が重なっても、次のタスクや追加のターンを始めない', async () => {
+    const { goal } = await approvedGoal();
+    let finish!: (result: TurnResult) => void;
+    provider.scripts.push(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(provider.inputs).toHaveLength(2));
+    const taskId = taskByNumber(1)!.id;
+    await core.sendTaskInstruction(taskId, '未送信の追加指示');
+    await core.cancelTask(taskId);
+    await expect(core.resumeTask(taskId)).rejects.toThrow('停止中');
+    await expect(
+      core.sendTaskInstruction(taskId, '停止中の指示'),
+    ).rejects.toThrow('中止の処理');
+    finish(completed(resultJson(false)));
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(taskByNumber(1)?.status).toBe('todo');
+    expect(taskByNumber(1)?.pendingInstructions).toBe(1);
+    expect(taskByNumber(1)?.paused).toBe(true);
+    expect(provider.inputs).toHaveLength(2);
+    expect(taskByNumber(2)?.status).toBe('todo');
+  });
+
+  it('承認待ちで中止すると承認を取り消し、自動で再実行しない', async () => {
+    const { goal } = await approvedGoal();
+    provider.scripts.push(async ({ handlers, signal }) => {
+      const response = await handlers.onApprovalRequest({
+        ...EMPTY_REQUEST,
+        kind: 'command',
+        command: 'gradlew build',
+      });
+      expect(response.decision).toBe('deny');
+      expect(signal.aborted).toBe(true);
+      return completed(resultJson(false));
+    });
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('approval'));
+    await core.cancelTask(taskByNumber(1)!.id);
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(core.snapshot().approvals).toHaveLength(0);
+    expect(taskByNumber(1)).toMatchObject({ status: 'todo', paused: true });
+    expect(provider.sessions).toHaveLength(2);
+
+    provider.scripts.push(untilCancelled);
+    await core.sendTaskInstruction(
+      taskByNumber(1)!.id,
+      'コマンドを見直して再開',
+    );
+    await vi.waitFor(() => expect(provider.sessions).toHaveLength(3));
+    expect(taskByNumber(1)?.paused).toBe(false);
+    expect(provider.inputs.at(-1)?.text).toContain('コマンドを見直して再開');
+    await core.cancelAll();
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+  });
+
+  it('中止後に停止確認の失敗が返ったときは、失敗を隠さず通知する', async () => {
+    const { goal } = await approvedGoal();
+    let finish!: (result: TurnResult) => void;
+    provider.scripts.push(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(provider.inputs).toHaveLength(2));
+    await core.cancelTask(taskByNumber(1)!.id);
+    finish({
+      status: 'failed',
+      finalMessage: null,
+      error: '停止を確認できません',
+    });
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(taskByNumber(1)).toMatchObject({
+      status: 'failed',
+      paused: false,
+      error: '停止を確認できません',
+    });
+    expect(provider.sessions).toHaveLength(2);
+    expect(notifications.at(-1)?.kind).toBe('taskFailed');
+  });
+
+  it('完了したタスクへの追加の指示を、同じセッションで実行する', async () => {
+    await reviewedGoal();
+    notifications.length = 0;
 
     provider.scripts.push(async () => completed(resultJson(false)));
     await core.sendTaskInstruction(taskByNumber(1)!.id, '処理時間を半分にして');
-    await vi.waitFor(() => expect(provider.inputs).toHaveLength(3));
-    expect(provider.inputs[2]?.text).toContain('処理時間を半分にして');
-    // 新しいセッションは作らない（計画とタスク #1 の2つだけ）
-    expect(provider.sessions).toHaveLength(2);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(provider.inputs).toHaveLength(4));
+    expect(provider.inputs[3]?.text).toContain('処理時間を半分にして');
+    // 新しいセッションは作らない（計画とタスク #1・#2 の3つだけ）
+    expect(provider.sessions).toHaveLength(3);
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
+    expect(goalStatus()).toBe('review');
+    expect(notifications.map((n) => n.kind)).toEqual(['goalReview']);
   });
 
-  async function reviewedTask() {
+  it('確認待ちの前に追加の指示で再実行しても、再起動が必要なことを残す', async () => {
     const { goal } = await approvedGoal();
-    provider.scripts.push(async () => completed(resultJson(false)));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    provider.scripts.push(
+      async () => completed(resultJson(true)),
+      async () => {
+        await gate;
+        return completed(resultJson(false));
+      },
+    );
     await core.approvePlan(goal.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
-    return taskByNumber(1)!;
+    await vi.waitFor(() => expect(taskByNumber(2)?.status).toBe('running'));
+
+    // 再起動が必要な #1 に、再起動のいらない追加の指示を送る
+    provider.scripts.push(async () => completed(resultJson(false)));
+    await core.sendTaskInstruction(taskByNumber(1)!.id, '表示名を直して');
+    release();
+
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    expect(provider.inputs.at(-1)?.text).toContain('表示名を直して');
+    expect(taskByNumber(1)?.needsGameRestart).toBe(true);
+    expect(notifications.at(-1)?.kind).toBe('goalReview');
+    expect(notifications.at(-1)?.body).toContain('#1');
+  });
+
+  /** 計画を承認し、2つのタスクが終わって目標が確認待ちになるまで進める */
+  async function reviewedGoal() {
+    const { goal } = await approvedGoal();
+    provider.scripts.push(
+      async () => completed(resultJson(false)),
+      async () => completed(resultJson(false)),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    return { goal, task: taskByNumber(1)! };
+  }
+
+  async function reviewedTask() {
+    return (await reviewedGoal()).task;
   }
 
   it('再開失敗と新規セッションの開始失敗を経ても、未送信の追加指示を再試行に含める', async () => {
@@ -256,7 +594,7 @@ describe('BridgeCore', () => {
     expect(start).toHaveBeenCalledTimes(1);
     provider.scripts.push(async () => completed(resultJson(false)));
     await core.retryTask(task.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
     expect(
       provider.inputs.filter((input) =>
         input.text.includes('未送信の固有指示'),
@@ -293,7 +631,7 @@ describe('BridgeCore', () => {
       expect(taskByNumber(1)?.pendingInstructions).toBe(1);
       provider.scripts.push(async () => completed(resultJson(false)));
       await core.retryTask(task.id);
-      await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+      await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
       expect(provider.inputs.at(-1)?.text).toContain('送信失敗でも残す');
       expect(taskByNumber(1)?.pendingInstructions).toBe(0);
     },
@@ -339,7 +677,7 @@ describe('BridgeCore', () => {
       expect(taskByNumber(1)?.pendingInstructions).toBe(1),
     );
     finish(completed(resultJson(false)));
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(runTurn.mock.calls[0][0].text).toContain('先の追加指示');
     expect(runTurn.mock.calls[0][0].text).not.toContain('あとから来た指示');
@@ -361,17 +699,15 @@ describe('BridgeCore', () => {
     await core.sendTaskInstruction(task.id, '開始前の中止でも残す');
     await vi.waitFor(() => expect(resuming).toHaveBeenCalledTimes(1));
     await core.cancelTask(task.id);
-    // 未着手へ戻ったあとの自動開始も失敗させ、未送信の保存内容を確認する。
-    vi.spyOn(provider, 'startSession').mockRejectedValueOnce(
-      new Error('next start failed'),
-    );
     resume({ sessionId: 'cancelled-before-start', runTurn });
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('failed'));
+    await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    expect(taskByNumber(1)?.status).toBe('todo');
+    expect(taskByNumber(1)?.paused).toBe(true);
     expect(runTurn).not.toHaveBeenCalled();
     expect(taskByNumber(1)?.pendingInstructions).toBe(1);
     provider.scripts.push(async () => completed(resultJson(false)));
-    await core.retryTask(task.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await core.resumeTask(task.id);
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
     expect(provider.inputs.at(-1)?.text).toContain('開始前の中止でも残す');
   });
 
@@ -387,7 +723,7 @@ describe('BridgeCore', () => {
     expect(taskByNumber(1)?.pendingInstructions).toBe(0);
     provider.scripts.push(async () => completed(resultJson(false)));
     await core.retryTask(task.id);
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
     expect(
       provider.inputs.filter((input) =>
         input.text.includes('受け付け済みの固有指示'),
@@ -407,7 +743,7 @@ describe('BridgeCore', () => {
     await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('failed'));
     provider.scripts.push(async () => completed(resultJson(false)));
     await core.sendTaskInstruction(task.id, '新しく送った指示');
-    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('review'));
+    await vi.waitFor(() => expect(taskByNumber(1)?.status).toBe('done'));
     expect(provider.inputs.at(-1)?.text).toContain('残った指示');
     expect(provider.inputs.at(-1)?.text).toContain('新しく送った指示');
     expect(taskByNumber(1)?.pendingInstructions).toBe(0);
@@ -434,6 +770,7 @@ describe('BridgeCore', () => {
     await core.updatePlanTask(t1.id, {
       title: t1.title,
       description: t1.description,
+      kind: t1.kind,
       dependsOn: [t2.id],
     });
     await expect(core.approvePlan(goal.id)).rejects.toThrow('循環');
@@ -542,18 +879,18 @@ describe('BridgeCore の起動時の後片付け', () => {
         readOnlyConcurrency: 2,
         createdAt: 0,
       });
-      // 計画を承認していない目標にして、起動しても実行が始まらないようにする
       store.goals.insert({
         id: 'g',
         projectId: 'p',
         title: 'g',
         text: 'g',
-        status: 'planReview',
+        status: 'active',
         planSummary: null,
         planError: null,
         providerId: 'codex',
         model: null,
         effort: null,
+        roundStartedAt: null,
         createdAt: 0,
       });
       store.tasks.insert(
@@ -563,7 +900,9 @@ describe('BridgeCore の起動時の後片付け', () => {
           number: 1,
           title: 't',
           description: '',
+          kind: 'edit',
           status: 'running',
+          paused: false,
           latest: '実行中',
           result: null,
           needsGameRestart: false,
@@ -577,17 +916,22 @@ describe('BridgeCore の起動時の後片付け', () => {
       store.tasks.addInstruction('t', '受け付け前の指示は再起動後も残す', 1);
       store.close();
 
+      const provider = new FakeProvider();
       const core = new BridgeCore({
         databasePath,
-        createProviders: () => [new FakeProvider()],
+        createProviders: () => [provider],
       });
+      core.start();
       const task = core.snapshot().tasks[0];
       expect(task?.status).toBe('todo');
+      expect(task?.paused).toBe(true);
+      expect(provider.sessions).toHaveLength(0);
       const events = await core.getProgressEvents({ type: 'task', id: 't' });
       expect(events[0]?.text).toContain('中断しました');
       await core.shutdown();
 
       const reopened = new BridgeStore(databasePath);
+      expect(reopened.tasks.get('t').paused).toBe(true);
       expect(reopened.tasks.getSessionId('t')).toBeNull();
       expect(reopened.tasks.peekInstructions('t').map((i) => i.text)).toEqual([
         '受け付け前の指示は再起動後も残す',

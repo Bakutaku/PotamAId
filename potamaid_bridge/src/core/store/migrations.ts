@@ -102,4 +102,25 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE consults ADD COLUMN model TEXT;
   ALTER TABLE consults ADD COLUMN effort TEXT;
   `,
+  // 調査タスクと、目標の単位の確認（タスクの「確認待ち」をなくし、目標に「確認中」「完了」を足す）
+  `
+  ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'edit';
+  ALTER TABLE goals ADD COLUMN round_started_at INTEGER;
+
+  -- すべてのタスクの確認を済ませた目標は、完了にする
+  UPDATE goals SET status = 'done'
+  WHERE status = 'active'
+    AND EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id)
+    AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id AND t.status <> 'done');
+
+  UPDATE tasks SET status = 'done' WHERE status = 'review';
+
+  -- 残りのタスクがすべて完了した目標は、確認中にする
+  UPDATE goals SET status = 'review'
+  WHERE status = 'active'
+    AND EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id)
+    AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id AND t.status <> 'done');
+  `,
+  // 中止したタスクを、手動で再開するまで自動実行の対象から外す
+  `ALTER TABLE tasks ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;`,
 ];

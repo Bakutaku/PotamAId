@@ -1,5 +1,5 @@
 /**
- * 設定: Codex の実行ファイル・モデルと思考量の既定・タイムアウト、対象modの名前と同時実行数。
+ * 設定: Codex の実行ファイル・モデルと思考量の既定・タイムアウト・通知、対象modの名前と同時実行数。
  * テーマはヘッダーのボタンで切り替える。
  */
 import { useEffect, useId, useState, type ReactNode } from 'react';
@@ -40,6 +40,7 @@ export function SettingsDialog({
   });
   const [requestTimeout, setRequestTimeout] = useState(60);
   const [idleTimeout, setIdleTimeout] = useState(10);
+  const [notifications, setNotifications] = useState(true);
   const [projectName, setProjectName] = useState('');
   const [concurrency, setConcurrency] = useState(2);
   const ids = {
@@ -62,6 +63,7 @@ export function SettingsDialog({
       });
       setRequestTimeout(settings.requestTimeoutSeconds);
       setIdleTimeout(settings.turnIdleTimeoutMinutes);
+      setNotifications(settings.desktopNotifications);
       setProjectName(project?.name ?? '');
       setConcurrency(project?.readOnlyConcurrency ?? 2);
     }
@@ -75,6 +77,7 @@ export function SettingsDialog({
         codexEffort: codexRun.effort ?? '',
         requestTimeoutSeconds: requestTimeout,
         turnIdleTimeoutMinutes: idleTimeout,
+        desktopNotifications: notifications,
       });
       if (project) {
         await bridge.updateProject(project.id, {
@@ -179,6 +182,22 @@ export function SettingsDialog({
         </p>
       </SettingsSection>
 
+      <SettingsSection title="通知">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="toggle toggle-sm"
+            checked={notifications}
+            onChange={(e) => setNotifications(e.target.checked)}
+          />
+          デスクトップ通知を出す
+        </label>
+        <p className="text-xs text-muted">
+          目標のタスクがすべて終わったとき、承認待ちになったとき、タスクが失敗したときに知らせます。Bridge
+          のウィンドウを見ている間は出しません。
+        </p>
+      </SettingsSection>
+
       {project && (
         <SettingsSection title={`対象mod（${project.name}）`}>
           <p className="text-xs break-all text-muted">{project.rootPath}</p>
@@ -190,7 +209,7 @@ export function SettingsDialog({
               className="input input-sm w-full"
             />
           </Field>
-          <Field id={ids.limit} label="計画・相談の同時実行数">
+          <Field id={ids.limit} label="読み取り専用の同時実行数">
             <input
               id={ids.limit}
               type="number"
@@ -202,7 +221,8 @@ export function SettingsDialog({
             />
           </Field>
           <p className="text-xs text-muted">
-            ファイルを編集するタスクは、この数に関わらず 1 件ずつ実行します。
+            計画の作成・調査タスク・相談を、この数まで並行して実行します。編集タスクは、この数に関わらず
+            1 件ずつ実行します。
           </p>
         </SettingsSection>
       )}

@@ -13,6 +13,7 @@ interface GoalRow {
   provider_id: string;
   model: string | null;
   effort: string | null;
+  round_started_at: number | null;
   created_at: number;
 }
 
@@ -27,6 +28,7 @@ const toGoal = (row: GoalRow): Goal => ({
   providerId: row.provider_id as ProviderId,
   model: row.model,
   effort: row.effort,
+  roundStartedAt: row.round_started_at,
   createdAt: row.created_at,
 });
 
@@ -57,7 +59,7 @@ export class GoalRepository {
 
   insert(goal: Goal): void {
     this.db.run(
-      'INSERT INTO goals (id, project_id, title, text, status, plan_summary, plan_error, provider_id, model, effort, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO goals (id, project_id, title, text, status, plan_summary, plan_error, provider_id, model, effort, round_started_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       goal.id,
       goal.projectId,
       goal.title,
@@ -68,6 +70,7 @@ export class GoalRepository {
       goal.providerId,
       goal.model,
       goal.effort,
+      goal.roundStartedAt,
       goal.createdAt,
     );
   }
@@ -79,6 +82,11 @@ export class GoalRepository {
       planError,
       id,
     );
+  }
+
+  /** いまの作業の区切りを始めた時刻を保存する */
+  setRoundStartedAt(id: string, time: number): void {
+    this.db.run('UPDATE goals SET round_started_at = ? WHERE id = ?', time, id);
   }
 
   /** 計画ができたときに、題名と要約を保存する */

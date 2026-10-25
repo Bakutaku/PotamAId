@@ -1,7 +1,21 @@
 import { useEffect, useId, useState } from 'react';
-import type { Task } from '../../../shared/domain';
+import type { Task, TaskKind } from '../../../shared/domain';
 import type { PlanTaskInput } from '../../../shared/ipc';
 import { Dialog } from '../../components/Dialog';
+
+const KIND_OPTIONS: { kind: TaskKind; label: string; description: string }[] = [
+  {
+    kind: 'edit',
+    label: '編集',
+    description: 'ファイルを編集する。対象modごとに 1 件ずつ実行する',
+  },
+  {
+    kind: 'investigate',
+    label: '調査',
+    description:
+      '読み取り専用で調べるだけ。ほかのタスクと並行して実行し、結果を後のタスクに渡す',
+  },
+];
 
 interface PlanTaskEditorProps {
   open: boolean;
@@ -14,7 +28,7 @@ interface PlanTaskEditorProps {
   onSave(input: PlanTaskInput): Promise<boolean>;
 }
 
-/** 計画のタスクを追加・編集するダイアログ（題名・内容・依存するタスク） */
+/** 計画のタスクを追加・編集するダイアログ（題名・内容・種類・依存するタスク） */
 export function PlanTaskEditor({
   open,
   task,
@@ -24,8 +38,10 @@ export function PlanTaskEditor({
 }: PlanTaskEditorProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const kindName = useId();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [kind, setKind] = useState<TaskKind>('edit');
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -35,6 +51,7 @@ export function PlanTaskEditor({
     if (open) {
       setTitle(task?.title ?? '');
       setDescription(task?.description ?? '');
+      setKind(task?.kind ?? 'edit');
       setDependsOn(task?.dependsOn ?? []);
     }
   }, [open, task?.id]); // oxlint-disable-line react-hooks/exhaustive-deps
@@ -48,7 +65,7 @@ export function PlanTaskEditor({
   const save = async () => {
     setSaving(true);
     try {
-      if (await onSave({ title, description, dependsOn })) {
+      if (await onSave({ title, description, kind, dependsOn })) {
         onClose();
       }
     } finally {
@@ -100,6 +117,24 @@ export function PlanTaskEditor({
           className="textarea w-full"
         />
       </div>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="mb-1 font-medium">種類</legend>
+        {KIND_OPTIONS.map((option) => (
+          <label key={option.kind} className="flex items-start gap-2">
+            <input
+              type="radio"
+              name={kindName}
+              className="radio radio-sm mt-0.5"
+              checked={kind === option.kind}
+              onChange={() => setKind(option.kind)}
+            />
+            <span className="flex flex-col">
+              {option.label}
+              <span className="text-xs text-muted">{option.description}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       {candidates.length > 0 && (
         <fieldset className="flex flex-col gap-1">
           <legend className="mb-1 font-medium">先に完了しているタスク</legend>

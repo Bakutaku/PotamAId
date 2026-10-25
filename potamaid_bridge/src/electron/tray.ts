@@ -2,10 +2,11 @@
  * タスクトレイのアイコンとメニュー（仕様書5章「アプリの画面」）。
  *
  * メニュー: 状態の要約、ウィンドウを開く、承認待ちを確認、すべての実行を中止、設定、Bridge を終了。
- * 承認待ちがあるときは、アイコンに印を付ける。
+ * 承認待ち・確認待ちの目標・失敗したタスクがあるときは、アイコンに印を付ける。
  */
 import { Menu, Tray, dialog } from 'electron';
 import type { BridgeCore } from '../core/BridgeCore';
+import { isGoalWorkFinished } from '../shared/goals';
 import type { BridgeSnapshot, UiCommand } from '../shared/ipc';
 import { createTrayIcons, type TrayIcons } from './trayIcon';
 
@@ -70,13 +71,15 @@ export class BridgeTray {
     const snapshot = this.core.snapshot();
     const summary = summarize(snapshot);
     const approvals = snapshot.approvals.length;
+    const attention = [
+      approvals > 0 ? `承認待ち ${approvals} 件` : '',
+      ...attentionLines(snapshot),
+    ].filter(Boolean);
 
     this.tray.setImage(
-      approvals > 0 ? this.icons.withBadge : this.icons.normal,
+      attention.length > 0 ? this.icons.withBadge : this.icons.normal,
     );
-    this.tray.setToolTip(
-      `PotamAId Bridge\n${summary}${approvals > 0 ? `\n承認待ち ${approvals} 件` : ''}`,
-    );
+    this.tray.setToolTip(['PotamAId Bridge', summary, ...attention].join('\n'));
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: 'PotamAId Bridge', enabled: false },
@@ -87,7 +90,11 @@ export class BridgeTray {
           label:
             approvals > 0 ? `承認待ちを確認（${approvals}）` : '承認待ちを確認',
           enabled: approvals > 0,
-          click: () => this.actions.showWindowWith({ type: 'showApprovals' }),
+          click: () =>
+            this.actions.showWindowWith({
+              type: 'showApprovals',
+              projectId: null,
+            }),
         },
         { type: 'separator' },
         {
@@ -122,11 +129,25 @@ export class BridgeTray {
   }
 }
 
-/** 「編集 1 / 2・計画・相談 1」のような要約 */
+/** 「編集 1 / 2・読み取り 1」のような要約 */
 function summarize(snapshot: BridgeSnapshot): string {
   const runs = Object.values(snapshot.runs);
   const edit = runs.reduce((sum, r) => sum + r.edit, 0);
   const readOnly = runs.reduce((sum, r) => sum + r.readOnly, 0);
   const queued = runs.reduce((sum, r) => sum + r.queued, 0);
-  return `編集 ${edit} / ${snapshot.projects.length}・計画・相談 ${readOnly}${queued > 0 ? `（順番待ち ${queued}）` : ''}`;
+  return `編集 ${edit} / ${snapshot.projects.length}・読み取り ${readOnly}${queued > 0 ? `（順番待ち ${queued}）` : ''}`;
+}
+
+/** 承認待ちのほかに、ユーザーの対応を待っているもの（確認待ちの目標・失敗したタスク） */
+function attentionLines(snapshot: BridgeSnapshot): string[] {
+  const reviewing = snapshot.goals.filter(
+    (g) =>
+      g.status === 'review' &&
+      isGoalWorkFinished(snapshot.tasks.filter((t) => t.goalId === g.id)),
+  ).length;
+  const failed = snapshot.tasks.filter((t) => t.status === 'failed').length;
+  return [
+    reviewing > 0 ? `確認待ちの目標 ${reviewing} 件` : '',
+    failed > 0 ? `失敗したタスク ${failed} 件` : '',
+  ];
 }

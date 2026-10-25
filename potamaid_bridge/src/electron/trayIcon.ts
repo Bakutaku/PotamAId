@@ -1,5 +1,5 @@
 /**
- * タスクトレイのアイコン。承認待ちがあるときは、右下に印（点）を付ける。
+ * タスクトレイのアイコン。ユーザーの対応を待っているものがあるときは、右下に印（点）を付ける。
  */
 import { nativeImage, type NativeImage } from 'electron';
 import { assetPath } from './assets';

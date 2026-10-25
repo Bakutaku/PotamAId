@@ -14,7 +14,7 @@ import type {
   ProgressOwner,
 } from '../../shared/domain';
 import { describeApproval, isPermissionRequest } from '../../shared/approvals';
-import type { StreamingText } from '../../shared/ipc';
+import type { StreamingText, UiCommand } from '../../shared/ipc';
 import type { ApprovalBroker } from '../ApprovalBroker';
 import type { TypedEmitter } from '../events';
 import type {
@@ -33,6 +33,16 @@ export interface CoreEvents extends Record<string, unknown> {
   changed: undefined;
   progress: ProgressEvent;
   streaming: StreamingText;
+  notification: BridgeNotification;
+}
+
+/** ユーザーの対応が必要になったことの知らせ（仕様書3章「通知」）。デスクトップ通知に使う */
+export interface BridgeNotification {
+  kind: 'goalReview' | 'approval' | 'taskFailed';
+  title: string;
+  body: string;
+  /** 通知を選んだときに画面で開くもの */
+  target: UiCommand;
 }
 
 /** ボードのカードに出す「最新の途中経過」の最大の長さ */
@@ -76,6 +86,25 @@ export class RunnerContext {
   /** 状態が変わったことを知らせる */
   changed(): void {
     this.emitter.emit('changed', undefined);
+  }
+
+  /** ユーザーの対応が必要になったことを知らせる */
+  notify(notification: BridgeNotification): void {
+    this.emitter.emit('notification', notification);
+  }
+
+  /** 通知に出す、途中経過の持ち主の名前（「タスク #1 ブロック」など） */
+  describeOwner(owner: ProgressOwner): string {
+    switch (owner.type) {
+      case 'task': {
+        const task = this.store.tasks.find(owner.id);
+        return task ? `タスク #${task.number} ${task.title}` : 'タスク';
+      }
+      case 'goal':
+        return `計画: ${this.store.goals.find(owner.id)?.title ?? '目標'}`;
+      case 'consult':
+        return `相談: ${this.store.consults.find(owner.id)?.title ?? ''}`;
+    }
   }
 
   /** 途中経過を保存して知らせる */
@@ -213,7 +242,9 @@ export class RunnerContext {
     if (!isFinal) {
       flush();
     }
-    return result;
+    return run.cancelRequested && result.status === 'completed'
+      ? { status: 'interrupted', finalMessage: null, error: null }
+      : result;
   }
 
   /**
@@ -241,6 +272,12 @@ export class RunnerContext {
     }
     const pending = this.broker.request(approval);
     this.changed();
+    this.notify({
+      kind: 'approval',
+      title: `承認待ち: ${this.describeOwner(owner)}`,
+      body: what,
+      target: { type: 'showApprovals', projectId },
+    });
 
     const response = await pending;
 

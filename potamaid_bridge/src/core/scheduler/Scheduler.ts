@@ -1,10 +1,12 @@
 /**
  * AI の実行枠の管理（仕様書3章・5章）。
  *
- * - ファイルを編集するタスクは、対象modごとに1件ずつ実行する。
+ * - 編集タスクは、対象modごとに1件ずつ実行する。
  *   実行するタスクは保存されている状態から {@link SchedulerHooks.nextEditTask} で選ぶ。
- * - 読み取り専用の実行（計画の作成・相談）は、対象modごとの上限まで並行して実行する。
- *   超えた分は順番待ち（FIFO）に入れ、空いた順に実行する。
+ * - 読み取り専用の実行（計画の作成・調査タスク・相談）は、対象modごとの上限まで並行して実行する。
+ *   計画の作成と相談は順番待ち（FIFO）に入れ、空いた順に実行する。
+ *   ユーザーが応答を待っているため、空いた枠には順番待ちを先に入れ、残りに調査タスクを入れる。
+ *   調査タスクは、編集タスクと同じく保存されている状態から {@link SchedulerHooks.nextInvestigateTask} で選ぶ。
  */
 import type { Task } from '../../shared/domain';
 import type { RunCounts } from '../../shared/ipc';
@@ -25,6 +27,15 @@ export interface SchedulerHooks {
   /** 次に実行する編集タスク。なければ null */
   nextEditTask(projectId: string): Task | null;
   runEditTask(task: Task): Promise<void>;
+  /**
+   * 次に実行する調査タスク。なければ null
+   * @param running 実行中の調査タスクの ID
+   */
+  nextInvestigateTask(
+    projectId: string,
+    running: ReadonlySet<string>,
+  ): Task | null;
+  runInvestigateTask(task: Task): Promise<void>;
   /** 実行の数が変わった */
   onChange(): void;
   onError(error: unknown): void;
@@ -35,6 +46,8 @@ export class Scheduler {
   private readonly runningReadOnly = new Map<string, ReadOnlyJob>();
   /** 対象mod の ID → 実行中の編集タスクの ID */
   private readonly runningEdit = new Map<string, string>();
+  /** 実行中の調査タスクの ID */
+  private readonly runningInvestigations = new Set<string>();
   private readonly settled = new Set<Promise<void>>();
   private stopped = false;
 
@@ -136,16 +149,41 @@ export class Scheduler {
   private pumpReadOnly(projectId: string): void {
     const limit = this.hooks.readOnlyLimit(projectId);
     while (this.counts(projectId).readOnly < limit) {
-      const index = this.queue.findIndex((job) => job.projectId === projectId);
-      if (index < 0) {
+      const job = this.takeQueued(projectId) ?? this.investigateJob(projectId);
+      if (!job) {
         return;
       }
-      const [job] = this.queue.splice(index, 1);
       this.runningReadOnly.set(job.key, job);
       this.track(job.run(), () => {
         this.runningReadOnly.delete(job.key);
       });
     }
+  }
+
+  private takeQueued(projectId: string): ReadOnlyJob | null {
+    const index = this.queue.findIndex((job) => job.projectId === projectId);
+    return index < 0 ? null : (this.queue.splice(index, 1)[0] ?? null);
+  }
+
+  /** 次の調査タスクを、読み取り専用の実行の1件として返す */
+  private investigateJob(projectId: string): ReadOnlyJob | null {
+    const task = this.hooks.nextInvestigateTask(
+      projectId,
+      this.runningInvestigations,
+    );
+    if (!task) {
+      return null;
+    }
+    this.runningInvestigations.add(task.id);
+    return {
+      key: `investigate:${task.id}`,
+      projectId,
+      run: () =>
+        this.hooks.runInvestigateTask(task).finally(() => {
+          this.runningInvestigations.delete(task.id);
+        }),
+      onDequeued: () => undefined,
+    };
   }
 
   /** 実行の終わりを見届け、枠を空けて次を入れる */

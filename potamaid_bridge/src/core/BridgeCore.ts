@@ -12,13 +12,17 @@ import type {
   ApprovalResponse,
   Consult,
   Goal,
+  GoalStatus,
   ProgressEvent,
   ProgressOwner,
   Project,
   ProviderStatus,
   RunOptions,
   Settings,
+  Task,
+  TaskKind,
 } from '../shared/domain';
+import { isGoalWorkFinished } from '../shared/goals';
 import type {
   BridgeApi,
   BridgeSnapshot,
@@ -37,7 +41,10 @@ import { RunnerContext } from './runners/RunnerContext';
 import type { CoreEvents } from './runners/RunnerContext';
 import { TaskRunner, taskRunKey } from './runners/TaskRunner';
 import { Scheduler } from './scheduler/Scheduler';
-import { selectNextTask } from './scheduler/selectNextTask';
+import {
+  selectNextEditTask,
+  selectNextInvestigateTask,
+} from './scheduler/selectNextTask';
 import { BridgeStore } from './store/BridgeStore';
 
 /** Bridge の本体が受け付ける操作（画面のダイアログなど Electron の機能を除く） */
@@ -95,16 +102,15 @@ export class BridgeCore implements CoreApi {
         this.store.projects.find(projectId)?.readOnlyConcurrency ??
         DEFAULT_READ_ONLY_CONCURRENCY,
       nextEditTask: (projectId) => {
-        const goals = this.store.goals
-          .list()
-          .filter((g) => g.projectId === projectId);
-        const goalIds = new Set(goals.map((g) => g.id));
-        const tasks = this.store.tasks
-          .list()
-          .filter((t) => goalIds.has(t.goalId));
-        return selectNextTask(goals, tasks);
+        const { goals, tasks } = this.projectWork(projectId);
+        return selectNextEditTask(goals, tasks);
       },
       runEditTask: (task) => this.taskRunner.run(task.id),
+      nextInvestigateTask: (projectId, running) => {
+        const { goals, tasks } = this.projectWork(projectId);
+        return selectNextInvestigateTask(goals, tasks, running);
+      },
+      runInvestigateTask: (task) => this.taskRunner.run(task.id),
       onChange: () => this.ctx.changed(),
       onError: (error) => this.reportError(error),
     });
@@ -212,6 +218,7 @@ export class BridgeCore implements CoreApi {
       planError: null,
       providerId: this.providers.defaultId,
       ...normalizeRunOptions(options),
+      roundStartedAt: null,
       createdAt: Date.now(),
     };
     this.store.goals.insert(goal);
@@ -249,7 +256,9 @@ export class BridgeCore implements CoreApi {
         number: tasks.length + 1,
         title: requireText(input.title, '題名を入力してください'),
         description: input.description.trim(),
+        kind: normalizeKind(input.kind),
         status: 'todo',
+        paused: false,
         latest: null,
         result: null,
         needsGameRestart: false,
@@ -270,6 +279,7 @@ export class BridgeCore implements CoreApi {
       this.store.tasks.update(taskId, {
         title: requireText(input.title, '題名を入力してください'),
         description: input.description.trim(),
+        kind: normalizeKind(input.kind),
       });
       this.store.tasks.setDependencies(
         taskId,
@@ -304,7 +314,10 @@ export class BridgeCore implements CoreApi {
     if (!check.ok) {
       throw new Error(check.error);
     }
-    this.store.goals.setStatus(goalId, 'active');
+    this.store.transaction(() => {
+      this.store.goals.setStatus(goalId, 'active');
+      this.store.goals.setRoundStartedAt(goalId, Date.now());
+    });
     this.ctx.record(
       { type: 'goal', id: goalId },
       'system',
@@ -314,40 +327,109 @@ export class BridgeCore implements CoreApi {
     this.scheduler.pump();
   }
 
+  // ---- 目標の確認 ----
+
+  async sendGoalInstruction(goalId: string, text: string): Promise<void> {
+    const body = requireText(text, '指示を入力してください');
+    const goal = this.store.goals.get(goalId);
+    if (goal.status !== 'review' && goal.status !== 'done') {
+      throw new Error('確認中か完了の目標だけ修正を指示できます');
+    }
+    const tasks = this.store.tasks.listByGoal(goalId);
+    const taskId = randomUUID();
+    this.store.transaction(() => {
+      this.startRoundIfIdle(goal, tasks);
+      // 修正はそれまでのタスクすべての後に実行し、その結果を添える
+      this.store.tasks.insert(
+        {
+          id: taskId,
+          goalId,
+          number: tasks.length + 1,
+          title: `修正: ${toTitle(body)}`,
+          description: body,
+          kind: 'edit',
+          status: 'todo',
+          paused: false,
+          latest: null,
+          result: null,
+          needsGameRestart: false,
+          error: null,
+          startedAt: null,
+          finishedAt: null,
+        },
+        tasks.map((t) => t.id),
+      );
+    });
+    this.ctx.record({ type: 'task', id: taskId }, 'user', body);
+    this.ctx.changed();
+    this.scheduler.pump();
+  }
+
+  async markGoalDone(goalId: string): Promise<void> {
+    const goal = this.store.goals.get(goalId);
+    if (goal.status !== 'review') {
+      throw new Error('確認中の目標だけ完了にできます');
+    }
+    if (!isGoalWorkFinished(this.store.tasks.listByGoal(goalId))) {
+      throw new Error('すべてのタスクが終わってから完了にしてください');
+    }
+    this.store.goals.setStatus(goalId, 'done');
+    this.ctx.record({ type: 'goal', id: goalId }, 'system', '完了にしました');
+    this.ctx.changed();
+    // 確認中の目標がなくなれば、他の目標の編集タスクを始められる
+    this.scheduler.pump();
+  }
+
   // ---- タスク ----
 
   async sendTaskInstruction(taskId: string, text: string): Promise<void> {
     const body = requireText(text, '指示を入力してください');
+    if (this.ctx.isCancelRequested(taskRunKey(taskId))) {
+      throw new Error('中止の処理が終わってから指示してください');
+    }
     const task = this.store.tasks.get(taskId);
-    if (this.store.goals.get(task.goalId).status !== 'active') {
+    const goal = this.store.goals.get(task.goalId);
+    if (!INSTRUCTABLE_GOALS.includes(goal.status)) {
       throw new Error('計画を承認してから指示してください');
     }
-    this.store.tasks.addInstruction(taskId, body, Date.now());
-    // 失敗時に残した未送信の指示だけでは自動再試行しない。新しい指示は明示的な再開として扱う。
-    if (task.status === 'failed') {
-      this.store.tasks.update(taskId, { status: 'todo', error: null });
-    }
+    this.store.transaction(() => {
+      this.startRoundIfIdle(goal, this.store.tasks.listByGoal(goal.id));
+      this.store.tasks.addInstruction(taskId, body, Date.now());
+      this.store.tasks.update(taskId, { paused: false });
+      // 失敗時に残した未送信の指示だけでは自動再試行しない。新しい指示は明示的な再開として扱う。
+      if (task.status === 'failed') {
+        this.store.tasks.update(taskId, { status: 'todo', error: null });
+      }
+    });
     this.ctx.changed();
-    // 確認待ち・完了・失敗のタスクは、空いていればすぐに続きを実行する
-    this.scheduler.pump();
-  }
-
-  async markTaskDone(taskId: string): Promise<void> {
-    const task = this.store.tasks.get(taskId);
-    if (task.status !== 'review') {
-      throw new Error('確認待ちのタスクだけ完了にできます');
-    }
-    this.store.tasks.update(taskId, { status: 'done', latest: null });
-    this.ctx.record({ type: 'task', id: taskId }, 'system', '完了にしました');
-    this.ctx.changed();
+    // 完了・失敗のタスクは、空いていればすぐに続きを実行する
     this.scheduler.pump();
   }
 
   async cancelTask(taskId: string): Promise<void> {
-    this.broker.cancelForOwner({ type: 'task', id: taskId });
     if (!this.ctx.requestCancel(taskRunKey(taskId))) {
       throw new Error('このタスクは実行していません');
     }
+    this.store.tasks.update(taskId, { paused: true });
+    this.broker.cancelForOwner({ type: 'task', id: taskId });
+    this.ctx.changed();
+  }
+
+  async resumeTask(taskId: string): Promise<void> {
+    const task = this.store.tasks.get(taskId);
+    const goal = this.store.goals.get(task.goalId);
+    if (
+      !task.paused ||
+      (task.status !== 'todo' && task.status !== 'done') ||
+      this.ctx.isRunning(taskRunKey(taskId)) ||
+      !INSTRUCTABLE_GOALS.includes(goal.status)
+    ) {
+      throw new Error('停止中のタスクだけ再開できます');
+    }
+    this.store.tasks.update(taskId, { paused: false });
+    this.ctx.record({ type: 'task', id: taskId }, 'system', '再開します');
+    this.ctx.changed();
+    this.scheduler.pump();
   }
 
   async retryTask(taskId: string): Promise<void> {
@@ -422,9 +504,28 @@ export class BridgeCore implements CoreApi {
   }
 
   async cancelAll(): Promise<void> {
+    // 実行の終了で枠が空いても、待機中のタスクや追加の指示を自動で始めない。
+    this.store.transaction(() => {
+      const goals = new Set(
+        this.store.goals
+          .list()
+          .filter((goal) => INSTRUCTABLE_GOALS.includes(goal.status))
+          .map((goal) => goal.id),
+      );
+      for (const task of this.store.tasks.list()) {
+        if (
+          goals.has(task.goalId) &&
+          (['todo', 'running', 'approval'].includes(task.status) ||
+            (task.status === 'done' && task.pendingInstructions > 0))
+        ) {
+          this.store.tasks.update(task.id, { paused: true });
+        }
+      }
+    });
+    this.ctx.cancelAllRuns();
     this.scheduler.clearQueue();
     this.broker.cancelAll();
-    this.ctx.cancelAllRuns();
+    this.ctx.changed();
   }
 
   async updateSettings(patch: Partial<Settings>): Promise<void> {
@@ -487,6 +588,32 @@ export class BridgeCore implements CoreApi {
     this.ctx.changed();
   }
 
+  /** 対象modの目標（作成順）とそのタスク */
+  private projectWork(projectId: string): { goals: Goal[]; tasks: Task[] } {
+    const goals = this.store.goals
+      .list()
+      .filter((g) => g.projectId === projectId);
+    const goalIds = new Set(goals.map((g) => g.id));
+    const tasks = this.store.tasks.list().filter((t) => goalIds.has(t.goalId));
+    return { goals, tasks };
+  }
+
+  /**
+   * 確認中・完了の目標に新しい作業を足すとき、作業が残っていなければ新しい区切りを始める。
+   * 完了にした目標は確認中に戻す。
+   */
+  private startRoundIfIdle(goal: Goal, tasks: Task[]): void {
+    if (goal.status !== 'review' && goal.status !== 'done') {
+      return;
+    }
+    if (isGoalWorkFinished(tasks)) {
+      this.store.goals.setRoundStartedAt(goal.id, Date.now());
+    }
+    if (goal.status === 'done') {
+      this.store.goals.setStatus(goal.id, 'review');
+    }
+  }
+
   private requirePlanReview(goalId: string): void {
     if (this.store.goals.get(goalId).status !== 'planReview') {
       throw new Error('計画の確認中の目標だけ編集できます');
@@ -500,7 +627,11 @@ export class BridgeCore implements CoreApi {
   private recoverInterruptedWork(): void {
     const message = '前回の Bridge の終了で中断しました';
     for (const task of this.store.tasks.listByStatus(['running', 'approval'])) {
-      this.taskRunner.resetToTodo(task.id, `${message}。未着手に戻しました。`);
+      this.taskRunner.resetToTodo(
+        task.id,
+        `${message}。再開するまで停止します。`,
+        true,
+      );
     }
     for (const id of this.store.consults.resetStatuses(
       ['running', 'queued'],
@@ -519,6 +650,14 @@ export class BridgeCore implements CoreApi {
   private reportError(error: unknown): void {
     this.options.onError?.(error);
   }
+}
+
+/** タスクに追加で指示できる目標の状態（計画を承認したあと） */
+const INSTRUCTABLE_GOALS: GoalStatus[] = ['active', 'review', 'done'];
+
+/** 画面から届いたタスクの種類。知らない値は編集タスクとして扱う */
+function normalizeKind(kind: TaskKind | undefined): TaskKind {
+  return kind === 'investigate' ? 'investigate' : 'edit';
 }
 
 /** モデルと思考量の空の指定は、設定の既定（null）として扱う */

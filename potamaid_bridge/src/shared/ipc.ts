@@ -18,13 +18,14 @@ import type {
   RunOptions,
   Settings,
   Task,
+  TaskKind,
 } from './domain';
 
 /** 対象modごとの実行の数（ヘッダーとトレイに出す） */
 export interface RunCounts {
-  /** 実行中の編集を伴うタスク（承認待ちを含む）。上限は対象modごとに1件 */
+  /** 実行中の編集タスク（承認待ちを含む）。上限は対象modごとに1件 */
   edit: number;
-  /** 実行中の読み取り専用の実行（計画の作成・相談） */
+  /** 実行中の読み取り専用の実行（計画の作成・調査タスク・相談） */
   readOnly: number;
   readOnlyLimit: number;
   /** 順番待ちの読み取り専用の実行 */
@@ -50,6 +51,7 @@ export interface BridgeSnapshot {
 export interface PlanTaskInput {
   title: string;
   description: string;
+  kind: TaskKind;
   /** 依存するタスクの ID */
   dependsOn: string[];
 }
@@ -85,13 +87,17 @@ export interface BridgeApi {
   removePlanTask(taskId: string): Promise<void>;
   /** 計画を承認して、タスクの実行を始める */
   approvePlan(goalId: string): Promise<void>;
+  /** 確認中・完了の目標に修正を指示する（修正のタスクを追加して実行する） */
+  sendGoalInstruction(goalId: string, text: string): Promise<void>;
+  /** 確認中の目標を完了にする */
+  markGoalDone(goalId: string): Promise<void>;
 
   /** タスクに追加で指示する */
   sendTaskInstruction(taskId: string, text: string): Promise<void>;
-  /** 確認待ちのタスクを完了にする */
-  markTaskDone(taskId: string): Promise<void>;
   /** 実行中のタスクを中止し、未着手に戻す */
   cancelTask(taskId: string): Promise<void>;
+  /** 中止したタスクを自動実行の対象に戻す */
+  resumeTask(taskId: string): Promise<void>;
   /** 失敗したタスクを未着手に戻す */
   retryTask(taskId: string): Promise<void>;
 
@@ -130,9 +136,11 @@ export const BRIDGE_API_METHODS = [
   'updatePlanTask',
   'removePlanTask',
   'approvePlan',
+  'sendGoalInstruction',
+  'markGoalDone',
   'sendTaskInstruction',
-  'markTaskDone',
   'cancelTask',
+  'resumeTask',
   'retryTask',
   'createConsult',
   'sendConsultMessage',
@@ -165,8 +173,18 @@ export interface StreamingText {
   text: string;
 }
 
-/** トレイのメニューなど、main から画面に頼む操作 */
-export type UiCommand = { type: 'openSettings' } | { type: 'showApprovals' };
+/** トレイのメニューや通知など、main から画面に頼む操作 */
+export type UiCommand =
+  | { type: 'openSettings' }
+  /** 承認待ちを開く。projectId が null なら、いちばん古い承認待ちの対象modを開く */
+  | { type: 'showApprovals'; projectId: string | null }
+  /** 目標を開く。taskId があれば、そのタスクの詳細も開く */
+  | {
+      type: 'showGoal';
+      projectId: string;
+      goalId: string;
+      taskId: string | null;
+    };
 
 /** main から画面へのプッシュ */
 export interface BridgeEvents {

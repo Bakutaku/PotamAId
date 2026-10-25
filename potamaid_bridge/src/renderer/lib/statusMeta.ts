@@ -19,19 +19,26 @@ export const TASK_STATUS: Record<TaskStatus, StatusMeta> = {
   todo: { label: '未着手', tone: 'neutral' },
   running: { label: '応答中', tone: 'info' },
   approval: { label: '承認待ち', tone: 'warning' },
-  review: { label: '確認待ち', tone: 'accent' },
   done: { label: '完了', tone: 'success' },
   failed: { label: '失敗', tone: 'error' },
 };
 
-/** 目標の表示上の状態。すべてのタスクが完了した目標は「完了」と表示する */
-export type GoalDisplayStatus = GoalStatus | 'done';
+/** 調査タスクに付ける印 */
+export const INVESTIGATE_META: StatusMeta = { label: '調査', tone: 'info' };
+
+/**
+ * 目標の表示上の状態。
+ * 確認中の目標は、修正を実行している間を「修正中」、それ以外を「確認待ち」と表示する
+ */
+export type GoalDisplayStatus = GoalStatus | 'fixing';
 
 export const GOAL_STATUS: Record<GoalDisplayStatus, StatusMeta> = {
   planning: { label: '計画中', tone: 'info' },
   planReview: { label: '計画の確認待ち', tone: 'warning' },
   planFailed: { label: '計画の失敗', tone: 'error' },
   active: { label: '進行中', tone: 'info' },
+  review: { label: '確認待ち', tone: 'accent' },
+  fixing: { label: '修正中', tone: 'info' },
   done: { label: '完了', tone: 'success' },
 };
 

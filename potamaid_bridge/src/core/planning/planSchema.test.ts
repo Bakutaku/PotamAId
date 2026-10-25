@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { parsePlan } from './planSchema';
 import { checkTaskGraph, sortByDependencies } from './taskGraph';
 
-const task = (key: string, dependsOn: string[] = []) => ({
+const task = (
+  key: string,
+  dependsOn: string[] = [],
+  kind: 'edit' | 'investigate' = 'edit',
+) => ({
   key,
   title: `タスク ${key}`,
   description: '',
+  kind,
   dependsOn,
 });
 
@@ -27,6 +32,25 @@ describe('parsePlan', () => {
   it('コードブロックで囲まれた JSON も読む', () => {
     const result = parsePlan(`\`\`\`json\n${plan([task('t1')])}\n\`\`\``);
     expect(result.ok).toBe(true);
+  });
+
+  it('タスクの種類（編集・調査）を読む', () => {
+    const result = parsePlan(
+      plan([task('t1', [], 'investigate'), task('t2', ['t1'])]),
+    );
+    expect(result.ok && result.value.tasks.map((t) => t.kind)).toEqual([
+      'investigate',
+      'edit',
+    ]);
+  });
+
+  it('知らない種類のタスクがあれば失敗する', () => {
+    const unknown = { ...task('t1'), kind: 'deploy' };
+    expect(
+      parsePlan(
+        JSON.stringify({ goalTitle: 'g', summary: 's', tasks: [unknown] }),
+      ).ok,
+    ).toBe(false);
   });
 
   it('JSON でなければ失敗する', () => {

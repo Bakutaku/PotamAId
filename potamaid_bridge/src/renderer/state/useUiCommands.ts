@@ -4,7 +4,7 @@ import { bridge } from '../api/bridge';
 import { useUiState } from './UiState';
 
 /**
- * トレイのメニューなど、main から頼まれた画面の操作を行う。
+ * トレイのメニューや通知など、main から頼まれた画面の操作を行う。
  * @param approvalsRef 「承認待ちを確認」でフォーカスを移す、承認待ちの枠
  */
 export function useUiCommands(
@@ -25,9 +25,10 @@ export function useUiCommands(
             u.openDialog('settings');
             break;
           case 'showApprovals': {
-            const first = s.approvals[0];
-            if (first) {
-              u.selectProject(first.projectId);
+            const projectId =
+              command.projectId ?? s.approvals[0]?.projectId ?? null;
+            if (projectId) {
+              u.selectProject(projectId);
             }
             // 対象modを切り替えたあとの描画を待ってから、枠へ移る
             setTimeout(() => {
@@ -36,6 +37,19 @@ export function useUiCommands(
             }, 0);
             break;
           }
+          case 'showGoal':
+            if (command.taskId) {
+              u.selectTask(command.taskId, {
+                goalId: command.goalId,
+                projectId: command.projectId,
+              });
+            } else {
+              u.showView(
+                { kind: 'goal', id: command.goalId },
+                command.projectId,
+              );
+            }
+            break;
         }
       }),
     [approvalsRef],

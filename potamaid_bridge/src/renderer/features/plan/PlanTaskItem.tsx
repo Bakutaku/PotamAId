@@ -1,6 +1,8 @@
 import type { Task } from '../../../shared/domain';
 import { IconButton } from '../../components/IconButton';
+import { StatusBadge } from '../../components/StatusBadge';
 import { dependencyText } from '../../lib/selectors';
+import { INVESTIGATE_META } from '../../lib/statusMeta';
 
 /** 計画の確認のタスクの1件 */
 export function PlanTaskItem({
@@ -20,7 +22,12 @@ export function PlanTaskItem({
         {task.number}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="font-medium">{task.title}</span>
+        <span className="flex items-center gap-1.5 font-medium">
+          {task.title}
+          {task.kind === 'investigate' && (
+            <StatusBadge meta={INVESTIGATE_META} />
+          )}
+        </span>
         <span className="text-xs whitespace-pre-wrap text-muted">
           {task.description}
         </span>

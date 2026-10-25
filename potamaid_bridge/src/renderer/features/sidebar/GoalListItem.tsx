@@ -1,6 +1,10 @@
 import type { Goal, Task } from '../../../shared/domain';
 import { ProgressBar } from '../../components/ProgressBar';
-import { goalDisplayStatus, goalProgress } from '../../lib/selectors';
+import {
+  goalDisplayStatus,
+  goalProgress,
+  isGoalStarted,
+} from '../../lib/selectors';
 import { GOAL_STATUS } from '../../lib/statusMeta';
 import { TEXT_CLASS } from '../../lib/tone';
 
@@ -18,10 +22,11 @@ export function GoalListItem({
 }) {
   const meta = GOAL_STATUS[goalDisplayStatus(goal, tasks)];
   const progress = goalProgress(tasks);
+  const started = isGoalStarted(goal);
   const progressText =
     goal.status === 'planReview'
       ? `${progress.total} タスクを提案`
-      : goal.status === 'active'
+      : started
         ? `${progress.done} / ${progress.total}`
         : '';
   return (
@@ -37,7 +42,7 @@ export function GoalListItem({
       {progressText && (
         <span className="flex items-center gap-2 text-[11px] text-muted">
           <ProgressBar
-            percent={goal.status === 'active' ? progress.percent : 0}
+            percent={started ? progress.percent : 0}
             label={`${goal.title} の進み具合`}
           />
           {progressText}

@@ -42,8 +42,9 @@ export function PlanReview({ goal, tasks }: { goal: Goal; tasks: Task[] }) {
       {goal.planSummary && <ChatBubble from="ai" text={goal.planSummary} />}
       <div role="note" className="rounded-field bg-info/10 px-3 py-2.5">
         AI
-        がコードを読んで作った計画です。タスクを編集・削除・追加してから承認してください。承認すると、依存関係の順に
-        1 件ずつ実行し、タスクごとに新しいセッションを使います。
+        がコードを読んで作った計画です。タスクを編集・削除・追加してから承認してください。承認すると、依存関係の順に実行し、タスクごとに新しいセッションを使います。編集タスクは
+        1
+        件ずつ、調査タスクは並行して実行します。すべてのタスクが終わったらお知らせするので、そこでまとめて動作を確かめてください。
       </div>
       {goal.planError && (
         <div role="alert" className="alert alert-error alert-soft">

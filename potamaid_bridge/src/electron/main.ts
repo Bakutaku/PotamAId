@@ -10,6 +10,7 @@ import { BridgeCore } from '../core/BridgeCore';
 import { CodexProvider } from '../core/providers/codex/CodexProvider';
 import type { UiCommand } from '../shared/ipc';
 import { registerIpc } from './ipc';
+import { DesktopNotifier } from './notifications';
 import { QuitController } from './quit';
 import { BridgeTray } from './tray';
 import { MainWindow } from './window';
@@ -27,6 +28,14 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function startBridge(): void {
+  // Windows ではアプリの ID がないとデスクトップ通知が出ない。
+  // パッケージでは Squirrel のショートカットと同じ ID、開発中は実行ファイルのパスを使う
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(
+      app.isPackaged ? 'com.squirrel.potamaid.potamaid' : process.execPath,
+    );
+  }
+
   const core = new BridgeCore({
     databasePath: path.join(app.getPath('userData'), 'bridge.sqlite'),
     createProviders: (getSettings) => [
@@ -55,9 +64,16 @@ function startBridge(): void {
     }
   };
 
+  const notifier = new DesktopNotifier(
+    core,
+    () => window.current,
+    showWindowWith,
+  );
+
   const quit = new QuitController(core, () => {
     window.prepareToQuit();
     tray?.dispose();
+    notifier.dispose();
     ipc.dispose();
   });
 

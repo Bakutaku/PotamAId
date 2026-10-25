@@ -16,15 +16,12 @@ export interface Project {
   name: string;
   /** リポジトリのルートの絶対パス。AI の作業ディレクトリになる */
   rootPath: string;
-  /** 読み取り専用の実行（計画の作成・相談）を同時に実行する数の上限 */
+  /** 読み取り専用の実行（計画の作成・調査タスク・相談）を同時に実行する数の上限 */
   readOnlyConcurrency: number;
   createdAt: number;
 }
 
-/**
- * 目標の状態。
- * すべてのタスクが完了した目標は、保存する状態は `active` のまま、画面で「完了」と表示する。
- */
+/** 目標の状態（仕様書3章「目標の状態」） */
 export type GoalStatus =
   /** AI が読み取り専用で計画を作っている（順番待ちを含む） */
   | 'planning'
@@ -33,7 +30,14 @@ export type GoalStatus =
   /** 計画の作成に失敗した。やり直せる */
   | 'planFailed'
   /** 計画を承認し、タスクを実行している */
-  | 'active';
+  | 'active'
+  /**
+   * タスクがすべて完了し、ユーザーが目標を確かめている（確認中）。
+   * 修正の指示を実行している間もこの状態のまま
+   */
+  | 'review'
+  /** ユーザーが目標の確認を済ませた */
+  | 'done';
 
 /** 目標（「○○を実装したい」という依頼） */
 export interface Goal {
@@ -52,6 +56,11 @@ export interface Goal {
   /** 計画の作成とタスクの実行に使うモデルと思考量。null は設定の既定 */
   model: string | null;
   effort: string | null;
+  /**
+   * いまの作業の区切りを始めた時刻（計画の承認と、確認中・完了の目標への新しい指示で更新する）。
+   * 確認待ちになったときに、この区切りで再起動が必要になったタスクを求めるのに使う
+   */
+  roundStartedAt: number | null;
   createdAt: number;
 }
 
@@ -62,13 +71,13 @@ export interface RunOptions {
 }
 
 /** タスクの状態（仕様書3章「タスクの状態」）。中止したタスクは `todo` に戻す */
-export type TaskStatus =
-  | 'todo'
-  | 'running'
-  | 'approval'
-  | 'review'
-  | 'done'
-  | 'failed';
+export type TaskStatus = 'todo' | 'running' | 'approval' | 'done' | 'failed';
+
+/**
+ * タスクの種類。
+ * 編集タスクは対象modごとに1件ずつ、調査タスクは読み取り専用で並行して実行する
+ */
+export type TaskKind = 'edit' | 'investigate';
 
 /** 目標を分けたタスク。1タスクにつき1つの AI のセッションを使う */
 export interface Task {
@@ -78,9 +87,12 @@ export interface Task {
   number: number;
   title: string;
   description: string;
+  kind: TaskKind;
   /** 先に完了している必要があるタスクの ID */
   dependsOn: string[];
   status: TaskStatus;
+  /** 中止後、ユーザーが再開するまで自動実行を止める（Bridge の再起動後も保持する） */
+  paused: boolean;
   /** 最新の途中経過の冒頭（ボードのカードに出す） */
   latest: string | null;
   /** AI が報告した結果の要約 */
@@ -251,6 +263,8 @@ export interface Settings {
   requestTimeoutSeconds: number;
   /** ターンの途中で AI から何も届かない状態が続いたら中止する分数（承認待ちの間は数えない） */
   turnIdleTimeoutMinutes: number;
+  /** ユーザーの対応が必要になったときに、デスクトップ通知を出すか */
+  desktopNotifications: boolean;
 }
 
 /** プロバイダーの準備の状態 */

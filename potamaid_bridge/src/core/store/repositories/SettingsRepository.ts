@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: Settings = {
   codexEffort: '',
   requestTimeoutSeconds: 60,
   turnIdleTimeoutMinutes: 10,
+  desktopNotifications: true,
 };
 
 /** 設定の保存と読み込み。項目ごとに JSON で保存する */

@@ -1,7 +1,7 @@
 import type { TaskStatus } from '../../../shared/domain';
 import type { Tone } from '../../lib/tone';
 
-/** ボードの列（仕様書5章「アプリの画面」: 未着手 → 応答中 → 確認待ち → 完了） */
+/** ボードの列（仕様書5章「アプリの画面」: 未着手 → 応答中 → 完了。失敗は、あるときだけ出す） */
 export interface BoardColumnDef {
   id: string;
   title: string;
@@ -10,6 +10,8 @@ export interface BoardColumnDef {
   tone: Tone;
   /** 完了の列は目立ちすぎないよう、カードを小さくする */
   compact: boolean;
+  /** 並べるタスクがないときは、列ごと出さない */
+  hideWhenEmpty: boolean;
   /** 列の幅の比率と最小の幅（横幅が足りないときは横にスクロールする） */
   grow: number;
   minWidthClass: string;
@@ -22,6 +24,7 @@ export const BOARD_COLUMNS: BoardColumnDef[] = [
     statuses: ['todo'],
     tone: 'neutral',
     compact: false,
+    hideWhenEmpty: false,
     grow: 1,
     minWidthClass: 'min-w-[190px]',
   },
@@ -31,17 +34,19 @@ export const BOARD_COLUMNS: BoardColumnDef[] = [
     statuses: ['running', 'approval'],
     tone: 'info',
     compact: false,
+    hideWhenEmpty: false,
     grow: 1.2,
     minWidthClass: 'min-w-[210px]',
   },
   {
-    id: 'review',
-    title: '確認待ち',
-    statuses: ['review', 'failed'],
-    tone: 'accent',
+    id: 'failed',
+    title: '失敗',
+    statuses: ['failed'],
+    tone: 'error',
     compact: false,
-    grow: 1.2,
-    minWidthClass: 'min-w-[210px]',
+    hideWhenEmpty: true,
+    grow: 1,
+    minWidthClass: 'min-w-[190px]',
   },
   {
     id: 'done',
@@ -49,6 +54,7 @@ export const BOARD_COLUMNS: BoardColumnDef[] = [
     statuses: ['done'],
     tone: 'success',
     compact: true,
+    hideWhenEmpty: false,
     grow: 0.9,
     minWidthClass: 'min-w-[170px]',
   },
