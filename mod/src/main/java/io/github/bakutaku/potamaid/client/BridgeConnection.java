@@ -8,6 +8,8 @@ import java.net.http.*;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -36,6 +38,28 @@ public final class BridgeConnection implements AutoCloseable {
     private long nextAttempt;
     private String sentState;
     private String lastError;
+    private volatile Consumer<JsonObject> messages = message -> {};
+    private final Map<String, Pending> pending = new HashMap<>();
+    private CompletableFuture<?> sending = CompletableFuture.completedFuture(null);
+    private record Pending(CompletableFuture<JsonObject> result, long deadline) {}
+
+    public void setMessageListener(Consumer<JsonObject> listener) { messages = listener; }
+
+    /** 操作は再接続時に再送しない。応答不明のときは利用者が状態を確かめる。 */
+    public CompletableFuture<JsonObject> request(JsonObject operation) {
+        var result = new CompletableFuture<JsonObject>();
+        var copy = operation.deepCopy();
+        if (closed) { result.completeExceptionally(new IllegalStateException("closed")); return result; }
+        try { worker.execute(() -> {
+            if (!welcomed || socket == null || pending.size() >= 16) {
+                result.completeExceptionally(new IllegalStateException("unavailable")); return;
+            }
+            String id = UUID.randomUUID().toString();
+            pending.put(id, new Pending(result, System.nanoTime() + TimeUnit.SECONDS.toNanos(15)));
+            send(object("type", "request", "requestId", id, "gameInstanceId", gameInstanceId, "operation", copy));
+        }); } catch (RejectedExecutionException e) { result.completeExceptionally(new IllegalStateException("closed")); }
+        return result;
+    }
 
     public BridgeConnection(String projectRoot, Path gameDirectory, GameConnection game) {
         this(projectRoot, gameDirectory, game::state, Path.of(System.getProperty("user.home"), ".potamaid", "bridge.json"),
@@ -56,6 +80,10 @@ public final class BridgeConnection implements AutoCloseable {
     private void tick() {
         if (closed) return;
         long now = System.nanoTime();
+        pending.entrySet().removeIf(entry -> {
+            if (now < entry.getValue().deadline()) return false;
+            entry.getValue().result().completeExceptionally(new TimeoutException()); return true;
+        });
         if (socket != null) {
             if ((!welcomed && now - connectedAt > TimeUnit.SECONDS.toNanos(10)) ||
                     now - lastResponse > TimeUnit.SECONDS.toNanos(60)) { disconnected("Bridge の応答がありません"); return; }
@@ -81,7 +109,10 @@ public final class BridgeConnection implements AutoCloseable {
             Path path = discovery;
             PrivateFiles.protect(path);
             var info = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
-            if (!new JsonPrimitive(1).equals(info.get("schemaVersion")) || !new JsonPrimitive(1).equals(info.get("protocolVersion")) ||
+            if (!new JsonPrimitive(2).equals(info.get("protocolVersion"))) {
+                disconnected("Bridge と Mod の通信バージョンが一致しません。両方を更新してください"); return;
+            }
+            if (!new JsonPrimitive(1).equals(info.get("schemaVersion")) ||
                     info.get("instanceId").getAsString().isBlank()) throw new IllegalArgumentException();
             URI uri = URI.create(info.get("url").getAsString());
             if (!"ws".equals(uri.getScheme()) || !"127.0.0.1".equals(uri.getHost()) || !"/mod".equals(uri.getRawPath()) ||
@@ -97,7 +128,7 @@ public final class BridgeConnection implements AutoCloseable {
             if (closed) { socket.abort(); socket = null; return; }
             welcomed = false; sentState = null;
             connectedAt = lastResponse = lastPing = System.nanoTime();
-            send(object("type", "hello", "protocolVersion", 1, "gameInstanceId", gameInstanceId,
+            send(object("type", "hello", "protocolVersion", 2, "gameInstanceId", gameInstanceId,
                     "projectRoot", root, "gameDirectory", normalizedGameDirectory));
         } catch (Exception e) {
             if (connecting != null) { connecting.cancel(true); connecting = null; }
@@ -108,14 +139,18 @@ public final class BridgeConnection implements AutoCloseable {
 
     private void send(JsonObject message) {
         WebSocket current = socket;
-        if (current != null) current.sendText(message.toString(), true).whenComplete((s, e) -> {
+        if (current != null) sending = sending.handle((s, e) -> null).thenCompose(v -> current.sendText(message.toString(), true)).whenComplete((s, e) -> {
             if (e != null && !closed) worker.execute(() -> { if (socket == current) disconnected("Bridge への送信に失敗しました"); });
         });
     }
 
     private void disconnected(String reason) {
+        boolean wasConnected = welcomed;
         if (socket != null) socket.abort();
         socket = null; welcomed = false; sentState = null;
+        for (var request : pending.values()) request.result().completeExceptionally(new IllegalStateException("disconnected"));
+        pending.clear();
+        if (wasConnected) messages.accept(object("type", "disconnected"));
         int seconds = new int[] {1, 2, 4, 8, 15}[Math.min(failures++, 4)];
         nextAttempt = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
         if (!reason.equals(lastError)) { warning.accept(reason); lastError = reason; }
@@ -134,10 +169,16 @@ public final class BridgeConnection implements AutoCloseable {
                     try {
                         var json = JsonParser.parseString(message).getAsJsonObject();
                         String type = json.get("type").getAsString();
-                        if (type.equals("welcome") && new JsonPrimitive(1).equals(json.get("protocolVersion")) &&
+                        if (type.equals("welcome") && new JsonPrimitive(2).equals(json.get("protocolVersion")) &&
                                 json.has("projectId") && json.get("projectId").isJsonPrimitive() &&
                                 json.get("projectId").getAsJsonPrimitive().isString() && !json.get("projectId").getAsString().isBlank()) {
                             welcomed = true; failures = 0; lastError = null;
+                            messages.accept(object("type", "connected"));
+                        } else if (welcomed && type.equals("response")) {
+                            var request = pending.remove(json.get("requestId").getAsString());
+                            if (request != null) request.result().complete(json);
+                        } else if (welcomed && (type.equals("consult_state") || type.equals("notice"))) {
+                            messages.accept(json);
                         } else if (type.equals("error")) {
                             // 相手の自由文をログへ転記しない。
                             String code = json.has("code") ? json.get("code").getAsString() : "";
@@ -170,7 +211,10 @@ public final class BridgeConnection implements AutoCloseable {
 
     @Override public void close() {
         closed = true;
-        worker.shutdownNow();
+        // close はゲームスレッドから呼ばれるため、待ちの片付けは専用スレッドで行う。
+        try { worker.execute(() -> { for (var request : pending.values()) request.result().completeExceptionally(new IllegalStateException("closed")); pending.clear(); }); }
+        catch (RejectedExecutionException ignored) {}
+        worker.shutdown();
         if (connecting != null) connecting.cancel(true);
         if (socket != null) socket.abort();
         http.shutdownNow();

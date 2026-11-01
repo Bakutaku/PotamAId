@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderStatus } from '../shared/domain';
@@ -223,7 +224,7 @@ describe('BridgeCore', () => {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           gameInstanceId,
           projectRoot: '',
           gameDirectory,
@@ -290,6 +291,244 @@ describe('BridgeCore', () => {
       ).toBe(false);
     } finally {
       ws.terminate();
+    }
+  });
+
+  it('ゲーム内の相談操作を対象modに限定し、要求の重複と再接続を扱う', async () => {
+    const project = await core.addProject(dir);
+    const otherDir = path.join(dir, 'other');
+    mkdirSync(otherDir);
+    const other = await core.addProject(otherDir);
+    provider.scripts.push(async () => completed('別の相談'));
+    const foreign = await core.createConsult(other.id, '別の相談', DEFAULT_RUN);
+    await vi.waitFor(() =>
+      expect(
+        core.snapshot().consults.find((c) => c.id === foreign.id)?.status,
+      ).toBe('idle'),
+    );
+    provider.scripts.push(async () => completed(planJson));
+    const foreignGoal = await core.createGoal(
+      other.id,
+      '別の目標',
+      DEFAULT_RUN,
+    );
+    await vi.waitFor(() =>
+      expect(goalStatus(foreignGoal.id)).toBe('planReview'),
+    );
+    core.start();
+    const file = path.join(repo.worktreesDir, 'connection', 'bridge.json');
+    await vi.waitFor(() => expect(existsSync(file)).toBe(true));
+    const info = JSON.parse(readFileSync(file, 'utf8'));
+    const gameInstanceId = randomUUID();
+    const open = async () => {
+      const ws = new WebSocket(info.url, {
+        headers: { Authorization: `Bearer ${info.token}` },
+      });
+      const messages: any[] = [];
+      ws.on('message', (bytes) => messages.push(JSON.parse(bytes.toString())));
+      await once(ws, 'open');
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          protocolVersion: 2,
+          gameInstanceId,
+          projectRoot: dir,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(messages.some((m) => m.type === 'welcome')).toBe(true),
+      );
+      const request = async (operation: unknown, requestId = randomUUID()) => {
+        const count = messages.filter((m) => m.requestId === requestId).length;
+        ws.send(
+          JSON.stringify({
+            type: 'request',
+            requestId,
+            gameInstanceId,
+            operation,
+          }),
+        );
+        await vi.waitFor(() =>
+          expect(
+            messages.filter((m) => m.requestId === requestId).length,
+          ).toBeGreaterThan(count),
+        );
+        return messages.filter((m) => m.requestId === requestId).at(-1);
+      };
+      return { ws, messages, request };
+    };
+    let client = await open();
+    try {
+      expect(
+        (await client.request({ action: 'consult_list' })).data.items,
+      ).toEqual([]);
+      for (const operation of [
+        { action: 'consult_select', id: foreign.id },
+        { action: 'goal', id: foreignGoal.id },
+        { action: 'task', id: core.snapshot().tasks[0].id },
+        { action: 'history', owner: 'consult', id: foreign.id },
+        { action: 'history', owner: 'task', id: core.snapshot().tasks[0].id },
+        { action: 'approvePlan', id: foreignGoal.id },
+        { action: 'consult_new', text: 'x'.repeat(2001) },
+      ])
+        expect((await client.request(operation)).ok).toBe(false);
+
+      provider.scripts.push(async (turn) => {
+        turn.handlers.onEvent({
+          type: 'progress',
+          kind: 'agent',
+          text: '中止前の途中の発言',
+        });
+        return untilCancelled(turn);
+      });
+      const requestId = randomUUID();
+      const created = await client.request(
+        { action: 'consult_new', text: 'ゲーム内から相談' },
+        requestId,
+      );
+      const id = created.data.consult.id;
+      await client.request(
+        { action: 'consult_new', text: '二重送信' },
+        requestId,
+      );
+      expect(
+        core.snapshot().consults.filter((c) => c.projectId === project.id),
+      ).toHaveLength(1);
+      await vi.waitFor(() =>
+        expect(core.snapshot().consults.find((c) => c.id === id)?.status).toBe(
+          'running',
+        ),
+      );
+      expect(provider.sessions.at(-1)?.access).toBe('readOnly');
+      expect(
+        (await client.request({ action: 'consult_send', text: '応答中' })).ok,
+      ).toBe(false);
+      await client.request({ action: 'consult_cancel' });
+      await vi.waitFor(() =>
+        expect(core.snapshot().consults.find((c) => c.id === id)?.status).toBe(
+          'idle',
+        ),
+      );
+      expect(
+        client.messages.some((m) => m.answer === '中止前の途中の発言'),
+      ).toBe(false);
+      provider.scripts.push(async ({ handlers }) => {
+        for (let i = 0; i < 8; i++)
+          handlers.onEvent({
+            type: 'progress',
+            kind: 'reasoning',
+            text: `途中経過 ${i}`,
+          });
+        handlers.onEvent({
+          type: 'progress',
+          kind: 'agent',
+          text: '途中の発言',
+        });
+        handlers.onEvent({
+          type: 'progress',
+          kind: 'agent',
+          text: `最後の回答 ${info.token}`,
+        });
+        return completed(`最後の回答 ${info.token}`);
+      });
+      await client.request({ action: 'consult_send', text: '続き' });
+      await vi.waitFor(() =>
+        expect(
+          client.messages.some(
+            (m) =>
+              m.type === 'consult_state' && m.answer?.includes('最後の回答'),
+          ),
+        ).toBe(true),
+      );
+      expect(client.messages.some((m) => m.answer === '途中の発言')).toBe(
+        false,
+      );
+      expect(JSON.stringify(client.messages)).not.toContain(info.token);
+      expect(provider.resumedOptions).toHaveLength(1);
+      provider.scripts.push(async () => completed(planJson));
+      const ownGoal = await core.createGoal(
+        project.id,
+        'ゲームから確認する目標',
+        DEFAULT_RUN,
+      );
+      await vi.waitFor(() => expect(goalStatus(ownGoal.id)).toBe('planReview'));
+      expect(
+        (await client.request({ action: 'goals' })).data.items.map(
+          (g: any) => g.id,
+        ),
+      ).toEqual([ownGoal.id]);
+      const detail = (await client.request({ action: 'goal', id: ownGoal.id }))
+        .data;
+      expect(detail.items).toHaveLength(2);
+      expect(
+        (await client.request({ action: 'task', id: detail.items[0].id })).data
+          .task.status,
+      ).toBe('todo');
+      expect(
+        (
+          await client.request({
+            action: 'history',
+            owner: 'goal',
+            id: ownGoal.id,
+          })
+        ).data.events.length,
+      ).toBeGreaterThan(0);
+      expect(
+        (await client.request({ action: 'goals', page: 2 })).data.items,
+      ).toEqual([]);
+      const history = (
+        await client.request({ action: 'history', owner: 'consult' })
+      ).data;
+      expect(history.events).toHaveLength(5);
+      expect(history.hasMore).toBe(true);
+      expect(history.events.every((e: any) => e.detail === undefined)).toBe(
+        true,
+      );
+      const older = (
+        await client.request({
+          action: 'history',
+          owner: 'consult',
+          before: history.before,
+        })
+      ).data;
+      expect(older.events.every((e: any) => e.seq < history.before)).toBe(true);
+
+      core.events.emit('notification', {
+        kind: 'approval',
+        title: '別の承認',
+        body: '秘密',
+        target: { type: 'showApprovals', projectId: other.id },
+      });
+      core.events.emit('notification', {
+        kind: 'approval',
+        title: '承認待ち',
+        body: '内容',
+        target: { type: 'showApprovals', projectId: project.id },
+      });
+      await vi.waitFor(() =>
+        expect(client.messages.filter((m) => m.type === 'notice')).toHaveLength(
+          1,
+        ),
+      );
+      expect(client.messages.find((m) => m.type === 'notice').body).toContain(
+        'Bridge',
+      );
+      client.ws.close();
+      await once(client.ws, 'close');
+      client = await open();
+      expect((await client.request({ action: 'status' })).data.selected).toBe(
+        null,
+      );
+      expect(
+        (await client.request({ action: 'consult_send', text: '未選択' })).ok,
+      ).toBe(false);
+      expect(
+        (await client.request({ action: 'consult_select', id: id.slice(0, 8) }))
+          .data.consult.id,
+      ).toBe(id);
+      expect(provider.resumedOptions).toHaveLength(1);
+    } finally {
+      client.ws.terminate();
     }
   });
 

@@ -68,6 +68,14 @@ export class ConsultRunner {
         this.fail(consultId, result.error ?? 'AI の実行に失敗しました');
         return;
       } else {
+        // 完了の本文がイベントと別に返るプロバイダーでも、最後の回答を履歴に残す。
+        const last = store.events.lastByOwner(owner);
+        if (
+          result.finalMessage &&
+          (last?.kind !== 'agent' || last.text !== result.finalMessage)
+        ) {
+          this.ctx.record(owner, 'agent', result.finalMessage);
+        }
         store.consults.setStatus(consultId, 'idle', null, Date.now());
       }
       this.ctx.changed();

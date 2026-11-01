@@ -10,10 +10,11 @@ import type { GameConnectionStatus, Project } from '../../shared/domain';
 import type { McpServerConfig } from '../providers/AiProvider';
 import { writePrivateJson } from './privateFiles';
 import { matchProject, ProjectMatchError } from './matchProject';
+import type { ModControl } from './ModControl';
 
 const helloSchema = z.object({
   type: z.literal('hello'),
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   gameInstanceId: z.string().uuid(),
   projectRoot: z.string().max(4096),
   gameDirectory: z.string().max(4096).optional(),
@@ -41,6 +42,8 @@ type Connection = {
   lastResponse: number;
   config: McpServerConfig | null;
   timer: NodeJS.Timeout;
+  control?: ModControl;
+  replies: Map<string, object>;
 };
 
 export class ModConnectionServer {
@@ -64,6 +67,10 @@ export class ModConnectionServer {
     private readonly projects: () => Project[],
     private readonly changed: () => void,
     directory = path.join(homedir(), '.potamaid'),
+    private readonly createControl?: (
+      projectId: string,
+      send: (data: object) => void,
+    ) => ModControl,
   ) {
     this.file = path.join(directory, 'bridge.json');
   }
@@ -112,7 +119,7 @@ export class ModConnectionServer {
     });
     await writePrivateJson(this.file, {
       schemaVersion: 1,
-      protocolVersion: 1,
+      protocolVersion: 2,
       instanceId: this.instanceId,
       url: `ws://127.0.0.1:${port}/mod`,
       token: this.token,
@@ -152,6 +159,7 @@ export class ModConnectionServer {
       gameInstanceId: null,
       lastResponse: Date.now(),
       config: null,
+      replies: new Map(),
       timer: setTimeout(
         () => this.reject(ws, 'hello_timeout', '接続開始の応答がありません'),
         10_000,
@@ -184,6 +192,7 @@ export class ModConnectionServer {
     });
     ws.on('error', () => undefined);
     ws.on('close', () => {
+      connection.control?.close();
       clearTimeout(connection.timer);
       clearInterval(connection.timer);
       this.sockets.delete(connection);
@@ -253,9 +262,12 @@ export class ModConnectionServer {
       c.ws.send(
         JSON.stringify({
           type: 'welcome',
-          protocolVersion: 1,
+          protocolVersion: 2,
           projectId: project.id,
         }),
+      );
+      c.control = this.createControl?.(project.id, (data) =>
+        this.sendControl(c, data),
       );
       this.changed();
       return;
@@ -263,6 +275,62 @@ export class ModConnectionServer {
     c.lastResponse = Date.now();
     if (data.type === 'ping') {
       c.ws.send(JSON.stringify({ type: 'pong' }));
+      return;
+    }
+    if (data.type === 'request') {
+      const request = z
+        .object({
+          type: z.literal('request'),
+          requestId: z.string().uuid(),
+          gameInstanceId: z.literal(c.gameInstanceId!),
+          operation: z.unknown(),
+        })
+        .strict()
+        .safeParse(data);
+      if (!request.success) {
+        this.reject(c.ws, 'invalid_request', '操作要求の形式が不正です');
+        return;
+      }
+      const { requestId, operation } = request.data;
+      const cached = c.replies.get(requestId);
+      if (cached) {
+        this.sendControl(c, cached);
+        return;
+      }
+      let result: object;
+      try {
+        if (!c.control) throw new Error('ゲーム内操作を利用できません');
+        result = {
+          type: 'response',
+          requestId,
+          ok: true,
+          data: await c.control.request(operation),
+        };
+      } catch (error) {
+        // スタック・認証ヘッダーを含む例外はそのまま渡さない。
+        const message = error instanceof Error ? error.message : '';
+        const known = [
+          '操作の種類・引数が不正です',
+          '対象modが見つかりません',
+          '先に相談を選択してください',
+          '対象の ID を指定するか、相談を選択してください',
+          '対象が見つからないか、ID の候補が複数あります。接続中の対象modの一覧を確認してください',
+          '応答が終わってから送ってください',
+          'この相談は実行していません',
+        ];
+        result = {
+          type: 'response',
+          requestId,
+          ok: false,
+          error: known.includes(message)
+            ? message
+            : '操作に失敗しました。Bridge で状態を確認してください',
+        };
+      }
+      c.replies.set(requestId, result);
+      if (c.replies.size > 128)
+        c.replies.delete(c.replies.keys().next().value!);
+      this.sendControl(c, result);
       return;
     }
     const parsed = stateSchema.safeParse(data);
@@ -306,6 +374,24 @@ export class ModConnectionServer {
     this.changed();
   }
 
+  private sendControl(c: Connection, data: object): void {
+    if (c.ws.readyState !== WebSocket.OPEN || this.closed) return;
+    let text = JSON.stringify(data).replaceAll(this.token, '[非表示]');
+    for (const connection of this.assigned.values()) {
+      const auth = connection.config?.headers?.Authorization;
+      if (auth)
+        text = text
+          .replaceAll(auth, '[非表示]')
+          .replaceAll(auth.slice(7), '[非表示]');
+    }
+    text = text.replace(/Bearer [a-f0-9]{64}/g, '[非表示]');
+    if (Buffer.byteLength(text) > 65536 || c.ws.bufferedAmount > 262144) {
+      c.ws.terminate();
+      return;
+    }
+    c.ws.send(text);
+  }
+
   private reject(ws: WebSocket, code: string, message: string): void {
     const c = [...this.sockets].find((s) => s.ws === ws);
     if (c?.projectId && this.assigned.get(c.projectId) === c) {
@@ -327,6 +413,7 @@ export class ModConnectionServer {
 
   private async cleanup(): Promise<void> {
     for (const c of this.sockets) {
+      c.control?.close();
       clearTimeout(c.timer);
       clearInterval(c.timer);
       c.ws.terminate();

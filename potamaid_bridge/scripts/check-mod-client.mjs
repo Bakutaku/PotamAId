@@ -34,7 +34,7 @@ async function start() {
       try {
         const m = JSON.parse(bytes.toString());
         if (m.type === 'hello') {
-          assert.equal(m.protocolVersion, 1);
+          assert.equal(m.protocolVersion, 2);
           assert.equal(m.projectRoot, '');
           assert.equal(
             path.resolve(m.gameDirectory).toLowerCase(),
@@ -45,7 +45,7 @@ async function start() {
           ws.send(
             JSON.stringify({
               type: 'welcome',
-              protocolVersion: 1,
+              protocolVersion: 2,
               projectId: 'test',
             }),
           );
@@ -96,7 +96,7 @@ async function start() {
     temporary,
     JSON.stringify({
       schemaVersion: 1,
-      protocolVersion: 1,
+      protocolVersion: 2,
       instanceId: randomUUID(),
       url: `ws://127.0.0.1:${wss.address().port}/mod`,
       token,

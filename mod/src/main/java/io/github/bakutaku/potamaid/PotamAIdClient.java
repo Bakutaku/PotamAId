@@ -15,6 +15,7 @@ import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import io.github.bakutaku.potamaid.client.BridgeConnection;
+import io.github.bakutaku.potamaid.client.BridgeChat;
 import io.github.bakutaku.potamaid.connection.GameConnection;
 
 // This class will not load on dedicated servers. Accessing client side code from here is safe.
@@ -24,6 +25,9 @@ import io.github.bakutaku.potamaid.connection.GameConnection;
 public class PotamAIdClient {
     private static GameConnection game;
     private static BridgeConnection bridge;
+    private static BridgeChat bridgeChat;
+
+    public static BridgeChat bridgeChat() { return bridgeChat; }
 
     public PotamAIdClient(ModContainer container, IEventBus bus) {
         // Allows NeoForge to create a config screen for this mod's configs.
@@ -41,6 +45,7 @@ public class PotamAIdClient {
             if (Config.BRIDGE_ENABLED.get()) {
                 bridge = new BridgeConnection(Config.BRIDGE_PROJECT_ROOT.get(),
                         Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath(), game);
+                bridgeChat = new BridgeChat(bridge);
                 bridge.start();
             }
         });

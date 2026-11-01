@@ -52,4 +52,13 @@ export class ProgressEventRepository {
       )
       .map(toEvent);
   }
+
+  lastByOwner(owner: ProgressOwner): ProgressEvent | undefined {
+    const row = this.db.get<ProgressEventRow>(
+      'SELECT * FROM progress_events WHERE owner_type = ? AND owner_id = ? ORDER BY seq DESC LIMIT 1',
+      owner.type,
+      owner.id,
+    );
+    return row && toEvent(row);
+  }
 }

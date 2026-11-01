@@ -37,6 +37,7 @@ import { findProfile, normalizeWeight } from '../shared/runConfig';
 import { ApprovalBroker } from './ApprovalBroker';
 import { BridgeMcpServer } from './mcp/BridgeMcpServer';
 import { ModConnectionServer } from './game/ModConnectionServer';
+import { ModControl } from './game/ModControl';
 import { TypedEmitter } from './events';
 import { GoalWorkspaces } from './git/GoalWorkspaces';
 import { checkTaskGraph } from './planning/taskGraph';
@@ -116,6 +117,7 @@ export class BridgeCore implements CoreApi {
       () => this.store.projects.list(),
       () => this.events.emit('changed', undefined),
       options.modConnectionDirectory,
+      (projectId, send) => new ModControl(this, projectId, send),
     );
     this.ctx = new RunnerContext(
       this.store,

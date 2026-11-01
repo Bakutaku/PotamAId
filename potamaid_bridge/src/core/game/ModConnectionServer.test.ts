@@ -59,7 +59,7 @@ describe('Mod と Bridge の接続', () => {
   function hello(gameInstanceId = randomUUID(), root = directory) {
     return {
       type: 'hello',
-      protocolVersion: 1,
+      protocolVersion: 2,
       gameInstanceId,
       projectRoot: root,
     };
@@ -107,7 +107,7 @@ describe('Mod と Bridge の接続', () => {
   });
   it('対象フォルダーの完全一致とバージョンを確認し、2つ目のゲームで置き換えない', async () => {
     expect(
-      (await send(await open(), { ...hello(), protocolVersion: 2 })).code,
+      (await send(await open(), { ...hello(), protocolVersion: 1 })).code,
     ).toBe('protocol_mismatch');
     await mkdir(path.join(directory, 'child'));
     expect(
