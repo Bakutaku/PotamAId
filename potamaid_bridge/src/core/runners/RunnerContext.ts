@@ -4,6 +4,7 @@
  * - 途中経過の保存と通知
  * - 実行中のターンの登録と中止（ターンが始まる前の中止にも対応する）
  * - 承認の待ち（許可・AI からの質問・MCP の入力要求）の登録と回答の記録
+ * - 決めた実行の設定から、使うプロバイダーとセッションの設定を求める
  */
 import { randomUUID } from 'node:crypto';
 import type {
@@ -12,7 +13,9 @@ import type {
   ProgressEvent,
   ProgressKind,
   ProgressOwner,
+  Settings,
 } from '../../shared/domain';
+import type { ResolvedRun } from '../../shared/runConfig';
 import { describeApproval, isPermissionRequest } from '../../shared/approvals';
 import type { StreamingText, UiCommand } from '../../shared/ipc';
 import type { ApprovalBroker } from '../ApprovalBroker';
@@ -20,8 +23,10 @@ import type { TypedEmitter } from '../events';
 import type { BridgeMcpServer, SessionScope } from '../mcp/BridgeMcpServer';
 import type {
   AiApprovalRequest,
+  AiProvider,
   AiSession,
   McpServerConfig,
+  SessionOptions,
   TurnHandle,
   TurnInput,
   TurnResult,
@@ -40,7 +45,7 @@ export interface CoreEvents extends Record<string, unknown> {
 
 /** ユーザーの対応が必要になったことの知らせ（仕様書3章「通知」）。デスクトップ通知に使う */
 export interface BridgeNotification {
-  kind: 'goalReview' | 'approval' | 'taskFailed';
+  kind: 'goalReview' | 'goalWaiting' | 'approval' | 'taskFailed';
   title: string;
   body: string;
   /** 通知を選んだときに画面で開くもの */
@@ -84,7 +89,20 @@ export class RunnerContext {
     readonly broker: ApprovalBroker,
     readonly emitter: TypedEmitter<CoreEvents>,
     private readonly mcp: BridgeMcpServer,
+    /** いまの Bridge の設定 */
+    readonly getSettings: () => Settings,
   ) {}
+
+  /** 決めた実行の設定の、プロバイダーとセッションの設定（モデルと思考量） */
+  prepareRun(run: ResolvedRun): {
+    provider: AiProvider;
+    options: Pick<SessionOptions, 'model' | 'effort'>;
+  } {
+    return {
+      provider: this.providers.get(run.providerId),
+      options: { model: run.model, effort: run.effort },
+    };
+  }
 
   /** セッションに渡す MCP サーバー（Bridge のツール）。使えなければ空 */
   async mcpServers(scope: SessionScope): Promise<McpServerConfig[]> {

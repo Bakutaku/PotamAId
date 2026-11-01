@@ -19,12 +19,15 @@ import type {
   Settings,
   Task,
   TaskKind,
+  TaskWeight,
+  WeightProfiles,
 } from './domain';
 
 /** 対象modごとの実行の数（ヘッダーとトレイに出す） */
 export interface RunCounts {
-  /** 実行中の編集タスク（承認待ちを含む）。上限は対象modごとに1件 */
+  /** 実行中の編集タスク（承認待ちを含む） */
   edit: number;
+  editLimit: number;
   /** 実行中の読み取り専用の実行（計画の作成・調査タスク・相談） */
   readOnly: number;
   readOnlyLimit: number;
@@ -52,14 +55,25 @@ export interface PlanTaskInput {
   title: string;
   description: string;
   kind: TaskKind;
+  weight: TaskWeight;
+  /** 直接指定する実行の設定。null なら重さで決める */
+  profileId: string | null;
   /** 依存するタスクの ID */
   dependsOn: string[];
+}
+
+/** タスクの実行の設定の変更（未着手・失敗のタスク） */
+export interface TaskRunInput {
+  weight: TaskWeight;
+  profileId: string | null;
 }
 
 /** 対象modの設定のうち、画面から変えられるもの */
 export interface ProjectPatch {
   name?: string;
   readOnlyConcurrency?: number;
+  editConcurrency?: number;
+  weightProfiles?: WeightProfiles;
 }
 
 /** 画面から Bridge への操作 */
@@ -91,6 +105,8 @@ export interface BridgeApi {
   sendGoalInstruction(goalId: string, text: string): Promise<void>;
   /** 確認中の目標を完了にする */
   markGoalDone(goalId: string): Promise<void>;
+  /** 反映待ちの目標を、ゲームを起動するディレクトリに反映し直す */
+  integrateGoal(goalId: string): Promise<void>;
 
   /** タスクに追加で指示する */
   sendTaskInstruction(taskId: string, text: string): Promise<void>;
@@ -100,6 +116,8 @@ export interface BridgeApi {
   resumeTask(taskId: string): Promise<void>;
   /** 失敗したタスクを未着手に戻す */
   retryTask(taskId: string): Promise<void>;
+  /** 実行していないタスクの重さと実行の設定を変える */
+  updateTaskRun(taskId: string, input: TaskRunInput): Promise<void>;
 
   /** 相談を作り、最初の質問を送る */
   createConsult(
@@ -138,10 +156,12 @@ export const BRIDGE_API_METHODS = [
   'approvePlan',
   'sendGoalInstruction',
   'markGoalDone',
+  'integrateGoal',
   'sendTaskInstruction',
   'cancelTask',
   'resumeTask',
   'retryTask',
+  'updateTaskRun',
   'createConsult',
   'sendConsultMessage',
   'cancelConsult',

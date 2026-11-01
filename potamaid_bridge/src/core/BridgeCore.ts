@@ -11,6 +11,7 @@ import path from 'node:path';
 import type {
   ApprovalResponse,
   Consult,
+  ExecutionProfile,
   Goal,
   GoalStatus,
   ProgressEvent,
@@ -21,21 +22,27 @@ import type {
   Settings,
   Task,
   TaskKind,
+  WeightProfiles,
 } from '../shared/domain';
+import { TASK_WEIGHTS } from '../shared/domain';
 import { isGoalWorkFinished } from '../shared/goals';
 import type {
   BridgeApi,
   BridgeSnapshot,
   PlanTaskInput,
   ProjectPatch,
+  TaskRunInput,
 } from '../shared/ipc';
+import { findProfile, normalizeWeight } from '../shared/runConfig';
 import { ApprovalBroker } from './ApprovalBroker';
 import { BridgeMcpServer } from './mcp/BridgeMcpServer';
 import { TypedEmitter } from './events';
+import { GoalWorkspaces } from './git/GoalWorkspaces';
 import { checkTaskGraph } from './planning/taskGraph';
 import type { AiProvider } from './providers/AiProvider';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { ConsultRunner, consultRunKey } from './runners/ConsultRunner';
+import { GoalIntegrator } from './runners/GoalIntegrator';
 import { PlanRunner, planRunKey } from './runners/PlanRunner';
 import type { PlanRequest } from './runners/PlanRunner';
 import { RunnerContext } from './runners/RunnerContext';
@@ -54,6 +61,8 @@ export type CoreApi = Omit<BridgeApi, 'pickProjectDirectory'>;
 export interface BridgeCoreOptions {
   /** データベースのファイルのパス */
   databasePath: string;
+  /** 目標の worktree を置くディレクトリ（Bridge のユーザーデータの worktrees。2026-10-25 決定） */
+  worktreesDir: string;
   /** プロバイダーを作る。設定は呼び出すたびに最新のものを返す */
   createProviders(getSettings: () => Settings): AiProvider[];
   /** 想定外のエラーの記録先 */
@@ -63,6 +72,9 @@ export interface BridgeCoreOptions {
 /** 読み取り専用の同時実行数の初期値と範囲 */
 const DEFAULT_READ_ONLY_CONCURRENCY = 2;
 const MAX_READ_ONLY_CONCURRENCY = 8;
+/** 編集タスクの同時実行数の初期値（並行しない）と上限 */
+const DEFAULT_EDIT_CONCURRENCY = 1;
+const MAX_EDIT_CONCURRENCY = 8;
 /** 題名に使う依頼文の長さ */
 const TITLE_MAX_LENGTH = 30;
 /** 終了時に、実行中のものが片付くのを待つ時間 */
@@ -80,6 +92,10 @@ export class BridgeCore implements CoreApi {
   private readonly planRunner: PlanRunner;
   private readonly taskRunner: TaskRunner;
   private readonly consultRunner: ConsultRunner;
+  private readonly workspaces: GoalWorkspaces;
+  private readonly integrator: GoalIntegrator;
+  /** worktree を作っている目標（承認の二重実行を防ぐ） */
+  private readonly approving = new Set<string>();
   private settings: Settings;
   private providerStatuses: ProviderStatus[] = [];
 
@@ -98,18 +114,33 @@ export class BridgeCore implements CoreApi {
       this.broker,
       this.events,
       this.mcp,
+      () => this.settings,
     );
     this.planRunner = new PlanRunner(this.ctx);
-    this.taskRunner = new TaskRunner(this.ctx);
+    this.workspaces = new GoalWorkspaces(options.worktreesDir);
+    this.integrator = new GoalIntegrator(
+      this.ctx,
+      this.workspaces,
+      () => this.scheduler.pump(),
+      (error) => this.reportError(error),
+    );
+    this.taskRunner = new TaskRunner(
+      this.ctx,
+      this.workspaces,
+      this.integrator,
+    );
     this.consultRunner = new ConsultRunner(this.ctx);
     this.scheduler = new Scheduler({
       projectIds: () => this.store.projects.list().map((p) => p.id),
       readOnlyLimit: (projectId) =>
         this.store.projects.find(projectId)?.readOnlyConcurrency ??
         DEFAULT_READ_ONLY_CONCURRENCY,
-      nextEditTask: (projectId) => {
+      editLimit: (projectId) =>
+        this.store.projects.find(projectId)?.editConcurrency ??
+        DEFAULT_EDIT_CONCURRENCY,
+      nextEditTask: (projectId, running) => {
         const { goals, tasks } = this.projectWork(projectId);
-        return selectNextEditTask(goals, tasks);
+        return selectNextEditTask(goals, tasks, running);
       },
       runEditTask: (task) => this.taskRunner.run(task.id),
       nextInvestigateTask: (projectId, running) => {
@@ -129,6 +160,7 @@ export class BridgeCore implements CoreApi {
     this.mcp.start().catch((error: unknown) => this.reportError(error));
     void this.refreshProviders();
     this.scheduler.pump();
+    this.resumeIntegrations();
   }
 
   // ---- 状態の取得 ----
@@ -178,6 +210,8 @@ export class BridgeCore implements CoreApi {
       name: path.basename(resolved),
       rootPath: resolved,
       readOnlyConcurrency: DEFAULT_READ_ONLY_CONCURRENCY,
+      editConcurrency: DEFAULT_EDIT_CONCURRENCY,
+      weightProfiles: {},
       createdAt: Date.now(),
     };
     this.store.projects.insert(project);
@@ -200,6 +234,12 @@ export class BridgeCore implements CoreApi {
     this.store.projects.update(projectId, {
       name,
       readOnlyConcurrency: concurrency,
+      editConcurrency:
+        patch.editConcurrency === undefined
+          ? undefined
+          : clamp(patch.editConcurrency, 1, MAX_EDIT_CONCURRENCY),
+      weightProfiles:
+        patch.weightProfiles && normalizeWeightProfiles(patch.weightProfiles),
     });
     this.ctx.changed();
     this.scheduler.pump();
@@ -226,6 +266,11 @@ export class BridgeCore implements CoreApi {
       planError: null,
       providerId: this.providers.defaultId,
       ...normalizeRunOptions(options),
+      branch: null,
+      baseBranch: null,
+      worktreePath: null,
+      workDir: null,
+      waitReason: null,
       roundStartedAt: null,
       createdAt: Date.now(),
     };
@@ -265,6 +310,8 @@ export class BridgeCore implements CoreApi {
         title: requireText(input.title, '題名を入力してください'),
         description: input.description.trim(),
         kind: normalizeKind(input.kind),
+        ...this.normalizeTaskRun(input),
+        runInfo: null,
         status: 'todo',
         paused: false,
         latest: null,
@@ -288,6 +335,7 @@ export class BridgeCore implements CoreApi {
         title: requireText(input.title, '題名を入力してください'),
         description: input.description.trim(),
         kind: normalizeKind(input.kind),
+        ...this.normalizeTaskRun(input),
       });
       this.store.tasks.setDependencies(
         taskId,
@@ -322,15 +370,35 @@ export class BridgeCore implements CoreApi {
     if (!check.ok) {
       throw new Error(check.error);
     }
-    this.store.transaction(() => {
-      this.store.goals.setStatus(goalId, 'active');
-      this.store.goals.setRoundStartedAt(goalId, Date.now());
-    });
-    this.ctx.record(
-      { type: 'goal', id: goalId },
-      'system',
-      '計画を承認しました',
-    );
+    if (this.approving.has(goalId)) {
+      throw new Error('承認の処理中です');
+    }
+    // 編集タスクは目標の worktree で実行する（仕様書3章「worktree での並行実行」）。
+    // git のリポジトリでなければ承認しない（2026-10-25 決定）
+    const goal = this.store.goals.get(goalId);
+    const project = this.requireProject(goal.projectId);
+    this.approving.add(goalId);
+    try {
+      const worktree = await this.workspaces.create(
+        project.id,
+        project.rootPath,
+        goalId,
+      );
+      this.requirePlanReview(goalId);
+      this.store.transaction(() => {
+        this.store.goals.setWorktree(goalId, worktree);
+        this.store.goals.setStatus(goalId, 'active');
+        this.store.goals.setRoundStartedAt(goalId, Date.now());
+      });
+      this.ctx.record(
+        { type: 'goal', id: goalId },
+        'system',
+        `計画を承認しました。${worktree.baseBranch} から目標のブランチ ${worktree.branch} を作り、worktree で実行します`,
+        worktree.worktreePath,
+      );
+    } finally {
+      this.approving.delete(goalId);
+    }
     this.ctx.changed();
     this.scheduler.pump();
   }
@@ -340,8 +408,12 @@ export class BridgeCore implements CoreApi {
   async sendGoalInstruction(goalId: string, text: string): Promise<void> {
     const body = requireText(text, '指示を入力してください');
     const goal = this.store.goals.get(goalId);
-    if (goal.status !== 'review' && goal.status !== 'done') {
-      throw new Error('確認中か完了の目標だけ修正を指示できます');
+    if (
+      goal.status !== 'review' &&
+      goal.status !== 'done' &&
+      goal.status !== 'waiting'
+    ) {
+      throw new Error('反映待ち・確認中・完了の目標だけ修正を指示できます');
     }
     const tasks = this.store.tasks.listByGoal(goalId);
     const taskId = randomUUID();
@@ -356,6 +428,10 @@ export class BridgeCore implements CoreApi {
           title: `修正: ${toTitle(body)}`,
           description: body,
           kind: 'edit',
+          // 修正は AI が重さを付けないため、標準にする（2026-10-25 決定）
+          weight: 'standard',
+          profileId: null,
+          runInfo: null,
           status: 'todo',
           paused: false,
           latest: null,
@@ -384,8 +460,25 @@ export class BridgeCore implements CoreApi {
     this.store.goals.setStatus(goalId, 'done');
     this.ctx.record({ type: 'goal', id: goalId }, 'system', '完了にしました');
     this.ctx.changed();
-    // 確認中の目標がなくなれば、他の目標の編集タスクを始められる
     this.scheduler.pump();
+    // 完了にした目標の worktree は消し、ブランチは残す（2026-10-25 決定）
+    if (goal.worktreePath) {
+      await this.removeWorktree(goal);
+    }
+    // 確認が終わったので、反映待ちの目標を反映する
+    void this.integrator.requestWaiting(goal.projectId);
+  }
+
+  async integrateGoal(goalId: string): Promise<void> {
+    const goal = this.store.goals.get(goalId);
+    if (goal.status !== 'waiting') {
+      throw new Error('反映待ちの目標だけ反映できます');
+    }
+    await this.integrator.request(goalId);
+    const after = this.store.goals.get(goalId);
+    if (after.status === 'waiting' && after.waitReason) {
+      throw new Error(after.waitReason);
+    }
   }
 
   // ---- タスク ----
@@ -448,6 +541,20 @@ export class BridgeCore implements CoreApi {
     this.store.tasks.update(taskId, { error: null });
     this.taskRunner.resetToTodo(taskId, 'やり直します。未着手に戻しました。');
     this.scheduler.pump();
+  }
+
+  async updateTaskRun(taskId: string, input: TaskRunInput): Promise<void> {
+    const task = this.store.tasks.get(taskId);
+    if (
+      (task.status !== 'todo' && task.status !== 'failed') ||
+      this.ctx.isRunning(taskRunKey(taskId))
+    ) {
+      throw new Error(
+        '未着手か失敗のタスクだけ、重さと実行の設定を変えられます',
+      );
+    }
+    this.store.tasks.update(taskId, this.normalizeTaskRun(input));
+    this.ctx.changed();
   }
 
   // ---- 相談 ----
@@ -538,7 +645,17 @@ export class BridgeCore implements CoreApi {
 
   async updateSettings(patch: Partial<Settings>): Promise<void> {
     const before = this.settings;
-    this.store.settings.save(normalizeSettings(patch));
+    const normalized = normalizeSettings(patch);
+    // 消した実行の設定を既定にしていたら、既定を外す
+    const profiles = normalized.profiles ?? before.profiles;
+    const defaultId =
+      normalized.defaultProfileId !== undefined
+        ? normalized.defaultProfileId
+        : before.defaultProfileId;
+    if (defaultId && !profiles.some((p) => p.id === defaultId)) {
+      normalized.defaultProfileId = null;
+    }
+    this.store.settings.save(normalized);
     this.settings = this.store.settings.load();
     this.ctx.changed();
     // モデル・思考量・タイムアウトは次の実行から使われる。実行ファイルが変わったときだけ起動し直す
@@ -564,6 +681,7 @@ export class BridgeCore implements CoreApi {
     this.scheduler.clearQueue();
     await this.providers.disposeAll();
     await this.scheduler.stop(SHUTDOWN_TIMEOUT_MS);
+    await this.integrator.idle();
     await this.mcp.close();
     this.store.close();
   }
@@ -609,9 +727,14 @@ export class BridgeCore implements CoreApi {
 
   /**
    * 確認中・完了の目標に新しい作業を足すとき、作業が残っていなければ新しい区切りを始める。
-   * 完了にした目標は確認中に戻す。
+   * 完了にした目標は確認中に戻す。反映待ちの目標は、worktree で続けるため進行中に戻す。
    */
   private startRoundIfIdle(goal: Goal, tasks: Task[]): void {
+    if (goal.status === 'waiting') {
+      this.store.goals.setStatus(goal.id, 'active');
+      this.store.goals.setWaitReason(goal.id, null);
+      return;
+    }
     if (goal.status !== 'review' && goal.status !== 'done') {
       return;
     }
@@ -620,6 +743,67 @@ export class BridgeCore implements CoreApi {
     }
     if (goal.status === 'done') {
       this.store.goals.setStatus(goal.id, 'review');
+    }
+  }
+
+  /** 画面から届いたタスクの重さと実行の設定。消えた実行の設定は指定なしにする */
+  private normalizeTaskRun(input: TaskRunInput): TaskRunInput {
+    return {
+      weight: normalizeWeight(input.weight),
+      profileId: findProfile(this.settings, input.profileId)?.id ?? null,
+    };
+  }
+
+  private requireProject(projectId: string): Project {
+    const project = this.store.projects.find(projectId);
+    if (!project) {
+      throw new Error('対象modが見つかりません');
+    }
+    return project;
+  }
+
+  /** 目標の worktree を消す。消せなくても完了の操作は失敗にしない */
+  private async removeWorktree(goal: Goal): Promise<void> {
+    const project = this.store.projects.find(goal.projectId);
+    if (!project || !goal.worktreePath) {
+      return;
+    }
+    try {
+      await this.workspaces.remove(project.rootPath, goal.worktreePath);
+      this.store.goals.setWorktree(goal.id, {
+        branch: goal.branch,
+        baseBranch: goal.baseBranch,
+        worktreePath: null,
+        workDir: null,
+      });
+      this.ctx.record(
+        { type: 'goal', id: goal.id },
+        'system',
+        `worktree を消しました（ブランチ ${goal.branch} は残しています）`,
+      );
+    } catch (error) {
+      this.ctx.record(
+        { type: 'goal', id: goal.id },
+        'error',
+        `worktree を消せませんでした: ${error instanceof Error ? error.message : String(error)}`,
+        goal.worktreePath,
+      );
+    }
+    this.ctx.changed();
+  }
+
+  /**
+   * 前回の終了で反映の途中だった目標と、反映待ちの目標の反映をやり直す
+   * （タスクがすべて終わった進行中の目標は、反映の前に終了したもの）
+   */
+  private resumeIntegrations(): void {
+    for (const goal of this.store.goals.list()) {
+      if (goal.status === 'active' && goal.worktreePath) {
+        void this.integrator.request(goal.id);
+      }
+    }
+    for (const project of this.store.projects.list()) {
+      void this.integrator.requestWaiting(project.id);
     }
   }
 
@@ -662,19 +846,57 @@ export class BridgeCore implements CoreApi {
 }
 
 /** タスクに追加で指示できる目標の状態（計画を承認したあと） */
-const INSTRUCTABLE_GOALS: GoalStatus[] = ['active', 'review', 'done'];
+const INSTRUCTABLE_GOALS: GoalStatus[] = [
+  'active',
+  'waiting',
+  'review',
+  'done',
+];
+
+/** 数値を整数にして範囲に収める */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(Number(value) || min)));
+}
 
 /** 画面から届いたタスクの種類。知らない値は編集タスクとして扱う */
 function normalizeKind(kind: TaskKind | undefined): TaskKind {
   return kind === 'investigate' ? 'investigate' : 'edit';
 }
 
-/** モデルと思考量の空の指定は、設定の既定（null）として扱う */
+/**
+ * 実行の設定・モデル・思考量の空の指定は、設定の既定（null）として扱う。
+ * 実行の設定を選んだときは、モデルと思考量を持たない
+ */
 function normalizeRunOptions(options: RunOptions | undefined): RunOptions {
-  return {
-    model: options?.model?.trim() || null,
-    effort: options?.effort?.trim() || null,
-  };
+  const profileId = options?.profileId?.trim() || null;
+  return profileId
+    ? { profileId, model: null, effort: null }
+    : {
+        profileId: null,
+        model: options?.model?.trim() || null,
+        effort: options?.effort?.trim() || null,
+      };
+}
+
+/** 重さ → 実行の設定の対応から、知らない重さと空の指定を除く */
+function normalizeWeightProfiles(map: WeightProfiles): WeightProfiles {
+  return Object.fromEntries(
+    TASK_WEIGHTS.flatMap((weight) => {
+      const id = map[weight]?.trim();
+      return id ? [[weight, id]] : [];
+    }),
+  );
+}
+
+/** 実行の設定を整える。名前は必須 */
+function normalizeProfiles(profiles: ExecutionProfile[]): ExecutionProfile[] {
+  return profiles.map((profile) => ({
+    id: profile.id?.trim() || randomUUID(),
+    name: requireText(profile.name ?? '', '実行の設定の名前を入力してください'),
+    providerId: profile.providerId === 'claude' ? 'claude' : 'codex',
+    model: profile.model?.trim() || null,
+    effort: profile.effort?.trim() || null,
+  }));
 }
 
 /** タイムアウトの範囲（秒・分） */
@@ -686,6 +908,9 @@ const TIMEOUT_LIMITS = {
 /** 設定の数値を範囲に収める */
 function normalizeSettings(patch: Partial<Settings>): Partial<Settings> {
   const result = { ...patch };
+  if (result.profiles !== undefined) {
+    result.profiles = normalizeProfiles(result.profiles);
+  }
   for (const key of Object.keys(
     TIMEOUT_LIMITS,
   ) as (keyof typeof TIMEOUT_LIMITS)[]) {

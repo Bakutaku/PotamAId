@@ -22,7 +22,11 @@ import { NoProjects } from './features/project/NoProjects';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { Sidebar } from './features/sidebar/Sidebar';
 import { TaskDetail } from './features/task/TaskDetail';
-import { describeRun } from './lib/runOptions';
+import {
+  describeRun,
+  describeRunInfo,
+  describeTaskPlan,
+} from './lib/runOptions';
 import {
   goalTasks,
   isGoalStarted,
@@ -118,7 +122,27 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
             task={task}
             tasks={goalTasks(snapshot, goal.id)}
             approvals={ownerApprovals(approvals, { type: 'task', id: task.id })}
-            runLabel={runLabel(snapshot, goal)}
+            runLabel={
+              task.runInfo
+                ? describeRunInfo(task.runInfo, codex)
+                : describeTaskPlan(
+                    task,
+                    goal,
+                    project ?? undefined,
+                    snapshot.settings,
+                    codex,
+                  )
+            }
+            profiles={snapshot.settings.profiles}
+            describeRun={(run) =>
+              describeTaskPlan(
+                run,
+                goal,
+                project ?? undefined,
+                snapshot.settings,
+                codex,
+              )
+            }
           />
         )}
       </div>
@@ -210,8 +234,17 @@ function MainContent({
         />
       );
     case 'planReview':
-      return <PlanReview goal={goal} tasks={tasks} />;
+      return (
+        <PlanReview
+          goal={goal}
+          tasks={tasks}
+          project={snapshot.projects.find((p) => p.id === goal.projectId)}
+          settings={snapshot.settings}
+          provider={snapshot.providers.find((p) => p.id === goal.providerId)}
+        />
+      );
     case 'active':
+    case 'waiting':
     case 'review':
     case 'done':
       return (

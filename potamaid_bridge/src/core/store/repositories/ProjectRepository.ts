@@ -1,4 +1,4 @@
-import type { Project } from '../../../shared/domain';
+import type { Project, WeightProfiles } from '../../../shared/domain';
 import type { ProjectPatch } from '../../../shared/ipc';
 import type { Database } from '../Database';
 
@@ -7,6 +7,8 @@ interface ProjectRow {
   name: string;
   root_path: string;
   read_only_concurrency: number;
+  edit_concurrency: number;
+  weight_profiles: string;
   created_at: number;
 }
 
@@ -15,6 +17,8 @@ const toProject = (row: ProjectRow): Project => ({
   name: row.name,
   rootPath: row.root_path,
   readOnlyConcurrency: row.read_only_concurrency,
+  editConcurrency: row.edit_concurrency,
+  weightProfiles: JSON.parse(row.weight_profiles) as WeightProfiles,
   createdAt: row.created_at,
 });
 
@@ -46,11 +50,13 @@ export class ProjectRepository {
 
   insert(project: Project): void {
     this.db.run(
-      'INSERT INTO projects (id, name, root_path, read_only_concurrency, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO projects (id, name, root_path, read_only_concurrency, edit_concurrency, weight_profiles, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       project.id,
       project.name,
       project.rootPath,
       project.readOnlyConcurrency,
+      project.editConcurrency,
+      JSON.stringify(project.weightProfiles),
       project.createdAt,
     );
   }
@@ -63,6 +69,20 @@ export class ProjectRepository {
       this.db.run(
         'UPDATE projects SET read_only_concurrency = ? WHERE id = ?',
         patch.readOnlyConcurrency,
+        id,
+      );
+    }
+    if (patch.editConcurrency !== undefined) {
+      this.db.run(
+        'UPDATE projects SET edit_concurrency = ? WHERE id = ?',
+        patch.editConcurrency,
+        id,
+      );
+    }
+    if (patch.weightProfiles !== undefined) {
+      this.db.run(
+        'UPDATE projects SET weight_profiles = ? WHERE id = ?',
+        JSON.stringify(patch.weightProfiles),
         id,
       );
     }

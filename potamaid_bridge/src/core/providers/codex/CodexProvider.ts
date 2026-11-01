@@ -142,7 +142,10 @@ export class CodexProvider implements AiProvider {
     );
     this.assertAvailable();
     this.loadedThreads.add(response.thread.id);
-    return this.createSession(response.thread.id, options);
+    return this.createSession(response.thread.id, options, {
+      model: response.model || null,
+      effort: options.effort || response.reasoningEffort,
+    });
   }
 
   async resumeSession(
@@ -187,9 +190,14 @@ export class CodexProvider implements AiProvider {
     return models;
   }
 
-  private createSession(threadId: string, options: SessionOptions): AiSession {
+  private createSession(
+    threadId: string,
+    options: SessionOptions,
+    actual: { model?: string | null; effort?: string | null } = {},
+  ): AiSession {
     return {
       sessionId: threadId,
+      ...actual,
       runTurn: (input, handlers) =>
         this.runTurn(threadId, options, input, handlers),
     };
@@ -423,17 +431,13 @@ export class CodexProvider implements AiProvider {
     };
   }
 
-  /** セッションの指定、なければ設定の既定。どちらも空なら Codex の設定に従う */
+  /** セッションの指定。空なら Codex の設定に従う（Bridge の設定の既定は呼び出し元で決める） */
   private model(options: SessionOptions): string | null {
-    return (
-      options.model || this.options.getSettings().codexModel.trim() || null
-    );
+    return options.model?.trim() || null;
   }
 
   private effort(options: SessionOptions): string | null {
-    return (
-      options.effort || this.options.getSettings().codexEffort.trim() || null
-    );
+    return options.effort?.trim() || null;
   }
 
   /** プロセスを（なければ起動して）返す */

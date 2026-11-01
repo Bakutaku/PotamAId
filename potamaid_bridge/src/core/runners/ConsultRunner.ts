@@ -4,6 +4,7 @@
  * 1件の相談で1つのセッションを使い、質問ごとにターンを実行して会話を続ける。
  */
 import type { ProgressOwner } from '../../shared/domain';
+import { resolveOwnerRun } from '../../shared/runConfig';
 import { CONSULT_INSTRUCTIONS } from '../planning/prompts';
 import type { AiSession } from '../providers/AiProvider';
 import type { RunnerContext } from './RunnerContext';
@@ -28,13 +29,14 @@ export class ConsultRunner {
       store.consults.setStatus(consultId, 'running', null, Date.now());
       this.ctx.changed();
 
-      const provider = this.ctx.providers.get(consult.providerId);
+      const { provider, options: runOptions } = this.ctx.prepareRun(
+        resolveOwnerRun(consult, this.ctx.getSettings()),
+      );
       const options = {
         cwd: project.rootPath,
         access: 'readOnly' as const,
         instructions: CONSULT_INSTRUCTIONS,
-        model: consult.model,
-        effort: consult.effort,
+        ...runOptions,
         mcpServers: await this.ctx.mcpServers({
           type: 'project',
           id: consult.projectId,

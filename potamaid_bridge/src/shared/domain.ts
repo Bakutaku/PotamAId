@@ -18,8 +18,18 @@ export interface Project {
   rootPath: string;
   /** 読み取り専用の実行（計画の作成・調査タスク・相談）を同時に実行する数の上限 */
   readOnlyConcurrency: number;
+  /** 編集タスクを同時に実行する数の上限（目標ごとの worktree で並行する。初期値は 1） */
+  editConcurrency: number;
+  /**
+   * タスクの重さ → 使う実行の設定（プロファイル）の ID。
+   * 指定のない重さは、目標の既定を使う（仕様書6章「実行の設定とモデルの選び方」）
+   */
+  weightProfiles: WeightProfiles;
   createdAt: number;
 }
+
+/** タスクの重さ → 実行の設定（プロファイル）の ID */
+export type WeightProfiles = Partial<Record<TaskWeight, string>>;
 
 /** 目標の状態（仕様書3章「目標の状態」） */
 export type GoalStatus =
@@ -29,8 +39,13 @@ export type GoalStatus =
   | 'planReview'
   /** 計画の作成に失敗した。やり直せる */
   | 'planFailed'
-  /** 計画を承認し、タスクを実行している */
+  /** 計画を承認し、タスクを実行している。反映の前の競合の解消を含む */
   | 'active'
+  /**
+   * タスクがすべて完了し、ゲームを起動するディレクトリへの反映を待っている
+   * （ほかの目標の確認中、コミットしていない変更がある、反映に失敗したなど）
+   */
+  | 'waiting'
   /**
    * タスクがすべて完了し、ユーザーが目標を確かめている（確認中）。
    * 修正の指示を実行している間もこの状態のまま
@@ -53,9 +68,23 @@ export interface Goal {
   /** 計画の作成に失敗したときの理由 */
   planError: string | null;
   providerId: ProviderId;
-  /** 計画の作成とタスクの実行に使うモデルと思考量。null は設定の既定 */
+  /**
+   * 目標の既定の実行の設定。計画の作成と、重さに対応する実行の設定がないタスクに使う。
+   * profileId がなければ model・effort（null は Bridge の設定の既定）
+   */
+  profileId: string | null;
   model: string | null;
   effort: string | null;
+  /** 目標のブランチ（計画の承認で作る。完了後も undo のために残す） */
+  branch: string | null;
+  /** 分岐元のブランチ（承認したときに、ゲームを起動するディレクトリで使っていたブランチ） */
+  baseBranch: string | null;
+  /** 目標の worktree の場所。完了にして消したら null */
+  worktreePath: string | null;
+  /** worktree の中で AI の作業ディレクトリにする場所（対象modのフォルダーに当たる場所） */
+  workDir: string | null;
+  /** 反映待ちの理由 */
+  waitReason: string | null;
   /**
    * いまの作業の区切りを始めた時刻（計画の承認と、確認中・完了の目標への新しい指示で更新する）。
    * 確認待ちになったときに、この区切りで再起動が必要になったタスクを求めるのに使う
@@ -64,8 +93,52 @@ export interface Goal {
   createdAt: number;
 }
 
-/** 目標・相談を作るときに選ぶ、モデルと思考量。null は設定の既定 */
+/**
+ * 目標・相談を作るときに選ぶ、実行の設定。
+ * profileId を選べばその実行の設定を使い、なければ model・effort を使う（null は設定の既定）
+ */
 export interface RunOptions {
+  profileId: string | null;
+  model: string | null;
+  effort: string | null;
+}
+
+/** 実行の設定（プロファイル）。プロバイダー・モデル・思考量の組に名前を付けたもの */
+export interface ExecutionProfile {
+  id: string;
+  name: string;
+  providerId: ProviderId;
+  /** null はプロバイダーの既定 */
+  model: string | null;
+  effort: string | null;
+}
+
+/**
+ * タスクの重さ（仕様書6章）。AI が計画のときに付け、使うモデルを決めるのに使う。
+ * 値の名前は仮のもの
+ */
+export type TaskWeight = 'light' | 'standard' | 'heavy' | 'max';
+
+/** 軽い順の重さ */
+export const TASK_WEIGHTS: readonly TaskWeight[] = [
+  'light',
+  'standard',
+  'heavy',
+  'max',
+];
+
+/** 実行の設定をどこから決めたか（タスクの指定 → 重さ → 目標の既定 → Bridge の設定の既定） */
+export type RunSource = 'task' | 'weight' | 'goal' | 'default';
+
+/** タスクの実行に実際に使った設定とモデル（設定を変えたあとでも分かるように記録する） */
+export interface TaskRunInfo {
+  source: RunSource;
+  /** 使った実行の設定。モデルを直接指定したときは null */
+  profileId: string | null;
+  /** 実行したときの実行の設定の名前 */
+  profileName: string | null;
+  providerId: ProviderId;
+  /** プロバイダーが実際に使ったモデル（分からなければ指定したもの） */
   model: string | null;
   effort: string | null;
 }
@@ -88,6 +161,12 @@ export interface Task {
   title: string;
   description: string;
   kind: TaskKind;
+  /** タスクの重さ */
+  weight: TaskWeight;
+  /** タスクで直接指定した実行の設定。null なら重さで決める */
+  profileId: string | null;
+  /** 最後の実行で実際に使った設定とモデル。まだ実行していなければ null */
+  runInfo: TaskRunInfo | null;
   /** 先に完了している必要があるタスクの ID */
   dependsOn: string[];
   status: TaskStatus;
@@ -116,7 +195,8 @@ export interface Consult {
   projectId: string;
   title: string;
   providerId: ProviderId;
-  /** 使うモデルと思考量。null は設定の既定 */
+  /** 使う実行の設定。profileId がなければ model・effort（null は設定の既定） */
+  profileId: string | null;
   model: string | null;
   effort: string | null;
   status: ConsultStatus;
@@ -259,6 +339,10 @@ export interface Settings {
   codexModel: string;
   /** Codex の思考量（reasoning effort）の既定。空ならモデルの既定に従う */
   codexEffort: string;
+  /** 登録した実行の設定（プロファイル） */
+  profiles: ExecutionProfile[];
+  /** 既定の実行の設定。null なら codexModel・codexEffort を使う */
+  defaultProfileId: string | null;
   /** AI のプロセスへの要求（起動・セッションの開始など）の応答を待つ秒数 */
   requestTimeoutSeconds: number;
   /** ターンの途中で AI から何も届かない状態が続いたら中止する分数（承認待ちの間は数えない） */

@@ -13,25 +13,53 @@ const RUNNING: TaskStatus[] = ['running', 'approval'];
 const RUNNABLE_GOALS: Goal['status'][] = ['active', 'review'];
 
 /**
+ * 編集タスクを実行する場所（仕様書3章「worktree での並行実行」）。
+ * 進行中の目標は目標の worktree、確認中・完了の目標の修正と worktree を持たない以前の目標は、
+ * ゲームを起動するディレクトリ（root）で実行する。同じ場所では1件ずつ実行する
+ */
+export function editLaneOf(goal: Goal): string {
+  return goal.status === 'active' && goal.worktreePath
+    ? `goal:${goal.id}`
+    : 'root';
+}
+
+/**
  * 1つの対象modの目標とタスクから、次に実行する編集タスクを返す。なければ null。
+ * 同時に実行する数の上限は、呼び出し元（スケジューラ）が見る。
  *
- * 1. 実行中の編集タスクがあれば、何も始めない（対象modごとに1件まで）
- * 2. 確認中の目標があれば、その目標のタスクだけを対象にする
- *    （ユーザーが確かめる変更に、別の目標の変更を混ぜないため）
+ * 1. 実行中の編集タスクと同じ場所（目標の worktree・ゲームを起動するディレクトリ）のタスクは選ばない
+ * 2. 確認中の目標の修正を先にする（利用者が待っているため）
  * 3. 追加の指示を待っている完了のタスクを優先する
  * 4. 目標を作成順に見て、依存先の作業がすべて終わった未着手のタスクを番号順に選ぶ
  *
  * @param goals 対象modの目標（作成順）
  * @param tasks それらの目標のタスク
+ * @param running 実行中か、実行を始めた編集タスクの ID
  */
-export function selectNextEditTask(goals: Goal[], tasks: Task[]): Task | null {
+export function selectNextEditTask(
+  goals: Goal[],
+  tasks: Task[],
+  running: ReadonlySet<string> = new Set(),
+): Task | null {
+  const goalById = new Map(goals.map((g) => [g.id, g]));
+  const laneOf = (task: Task) => {
+    const goal = goalById.get(task.goalId);
+    return goal ? editLaneOf(goal) : null;
+  };
   const edits = tasks.filter((t) => t.kind === 'edit');
-  if (edits.some((t) => RUNNING.includes(t.status))) {
-    return null;
-  }
-  const reviewing = goals.filter((g) => g.status === 'review');
-  const targets = reviewing.length > 0 ? reviewing : goals;
-  return selectRunnable(targets, tasks, edits, () => true);
+  const isRunning = (t: Task) =>
+    running.has(t.id) || RUNNING.includes(t.status);
+  const busy = new Set(edits.filter(isRunning).map(laneOf));
+  const ordered = [
+    ...goals.filter((g) => g.status === 'review'),
+    ...goals.filter((g) => g.status !== 'review'),
+  ];
+  return selectRunnable(
+    ordered,
+    tasks,
+    edits,
+    (t) => !isRunning(t) && !busy.has(laneOf(t)),
+  );
 }
 
 /**

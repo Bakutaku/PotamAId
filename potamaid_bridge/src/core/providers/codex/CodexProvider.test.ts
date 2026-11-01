@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalResponse, Settings } from '../../../shared/domain';
 import type { TurnHandlers } from '../AiProvider';
 import { BridgeCore } from '../../BridgeCore';
+import { createTestRepo } from '../../git/testRepo';
 import {
   AppServerClient,
   type AppServerClientOptions,
@@ -18,6 +19,8 @@ const settings: Settings = {
   codexPath: '',
   codexModel: '',
   codexEffort: '',
+  profiles: [],
+  defaultProfileId: null,
   requestTimeoutSeconds: 2,
   turnIdleTimeoutMinutes: 1,
   desktopNotifications: false,
@@ -241,6 +244,31 @@ describe('CodexProvider のターンの分離と停止', () => {
     expect(request.mock.calls.some(([method]) => method === 'turn/start')).toBe(
       false,
     );
+  });
+
+  it('再接続の間は失敗にせず待つ', async () => {
+    const session = await provider.startSession(options);
+    const turn = session.runTurn({ text: 'first' }, handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    callbacks.onNotification({
+      method: 'error',
+      params: {
+        threadId: 'thread',
+        turnId: 'turn-1',
+        willRetry: true,
+        error: {
+          message: 'retry',
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+    } as never);
+    expect(handlers.onEvent).toHaveBeenCalledWith({
+      type: 'activity',
+      text: '再試行しています: retry',
+    });
+    complete('turn-1');
+    expect((await turn.result).status).toBe('completed');
   });
 
   it('実行中の中止にも停止確認の期限があり、承認を取り消す', async () => {
@@ -499,13 +527,16 @@ describe('CodexProvider のターンの分離と停止', () => {
   });
 
   it('同じ対象modの次タスクを停止確認前には開始せず、期限後も Codex へ送らない', async () => {
+    const repo = createTestRepo();
     const core = new BridgeCore({
       databasePath: ':memory:',
+      worktreesDir: repo.worktreesDir,
       createProviders: () => [provider],
     });
     try {
-      const project = await core.addProject(process.cwd());
+      const project = await core.addProject(repo.dir);
       const goal = await core.createGoal(project.id, 'goal', {
+        profileId: null,
         model: null,
         effort: null,
       });
@@ -559,15 +590,19 @@ describe('CodexProvider のターンの分離と停止', () => {
         request.mock.calls.filter(([method]) => method === 'turn/start'),
       ).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(2000);
-      expect(core.snapshot().tasks.map((task) => task.status)).toEqual([
-        'failed',
-        'failed',
-      ]);
+      // 途中までの変更のコミット（実際の git）を待つ
+      await vi.waitFor(() =>
+        expect(core.snapshot().tasks.map((task) => task.status)).toEqual([
+          'failed',
+          'failed',
+        ]),
+      );
       expect(
         request.mock.calls.filter(([method]) => method === 'turn/start'),
       ).toHaveLength(2);
     } finally {
       await core.shutdown();
+      repo.cleanup();
     }
   });
 });

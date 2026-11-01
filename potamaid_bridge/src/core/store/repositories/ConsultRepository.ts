@@ -10,6 +10,7 @@ interface ConsultRow {
   project_id: string;
   title: string;
   provider_id: string;
+  profile_id: string | null;
   model: string | null;
   effort: string | null;
   session_id: string | null;
@@ -24,6 +25,7 @@ const toConsult = (row: ConsultRow): Consult => ({
   projectId: row.project_id,
   title: row.title,
   providerId: row.provider_id as ProviderId,
+  profileId: row.profile_id,
   model: row.model,
   effort: row.effort,
   status: row.status as ConsultStatus,
@@ -61,11 +63,12 @@ export class ConsultRepository {
 
   insert(consult: Consult): void {
     this.db.run(
-      'INSERT INTO consults (id, project_id, title, provider_id, model, effort, status, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO consults (id, project_id, title, provider_id, profile_id, model, effort, status, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       consult.id,
       consult.projectId,
       consult.title,
       consult.providerId,
+      consult.profileId,
       consult.model,
       consult.effort,
       consult.status,

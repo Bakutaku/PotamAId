@@ -58,14 +58,19 @@ export function NewGoalDialog({
         value={options}
         onChange={setOptions}
         models={provider?.models ?? []}
+        profiles={settings.profiles}
         defaultModel={defaultModelOf(settings, provider)}
         defaultLabel="設定の既定"
       />
       <p className="text-xs text-muted">
-        計画の作成と、この目標のすべてのタスクで使います。
+        目標の既定です。計画の作成と、重さに対応する実行の設定を決めていないタスクで使います。
       </p>
     </TextPromptDialog>
   );
 }
 
-const EMPTY_OPTIONS: RunOptions = { model: null, effort: null };
+const EMPTY_OPTIONS: RunOptions = {
+  profileId: null,
+  model: null,
+  effort: null,
+};

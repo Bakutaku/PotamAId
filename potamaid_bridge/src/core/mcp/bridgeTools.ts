@@ -26,6 +26,7 @@ const GOAL_STATUS_LABEL: Record<GoalStatus, string> = {
   planReview: '計画の確認待ち',
   planFailed: '計画の失敗',
   active: '進行中',
+  waiting: '反映待ち',
   review: '確認待ち',
   done: '完了',
 };

@@ -1,6 +1,6 @@
 /**
  * 目標のボード。選んだ目標のタスクを状態ごとの列に並べる。
- * 確認中・完了の目標では、列の上に目標の確認の枠を出す。
+ * 確認中・完了の目標では、列の上に目標の確認の枠を出す。反映待ちの目標では、反映待ちの枠を出す。
  */
 import type { Goal, Task } from '../../../shared/domain';
 import { ProgressBar } from '../../components/ProgressBar';
@@ -11,6 +11,7 @@ import { useUiState } from '../../state/UiState';
 import { BOARD_COLUMNS } from './boardColumns';
 import { BoardColumn } from './BoardColumn';
 import { GoalReviewPanel } from './GoalReviewPanel';
+import { GoalWaitingPanel } from './GoalWaitingPanel';
 
 export function GoalBoard({
   goal,
@@ -49,6 +50,7 @@ export function GoalBoard({
         </div>
         <p className="text-muted whitespace-pre-wrap">{goal.text}</p>
       </div>
+      {goal.status === 'waiting' && <GoalWaitingPanel goal={goal} />}
       {(goal.status === 'review' || goal.status === 'done') && (
         <GoalReviewPanel goal={goal} tasks={tasks} />
       )}

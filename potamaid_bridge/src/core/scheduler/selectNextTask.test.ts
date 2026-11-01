@@ -14,8 +14,14 @@ const goal = (id: string, status: Goal['status'] = 'active'): Goal => ({
   planSummary: null,
   planError: null,
   providerId: 'codex',
+  profileId: null,
   model: null,
   effort: null,
+  branch: null,
+  baseBranch: null,
+  worktreePath: null,
+  workDir: null,
+  waitReason: null,
   roundStartedAt: null,
   createdAt: 0,
 });
@@ -35,6 +41,9 @@ const task = (
   title: id,
   description: '',
   kind,
+  weight: 'standard',
+  profileId: null,
+  runInfo: null,
   dependsOn,
   status,
   paused: false,
@@ -99,8 +108,30 @@ describe('selectNextEditTask', () => {
     expect(selectNextEditTask([goal('g')], tasks)?.id).toBe('a');
   });
 
-  it('確認中の目標があれば、別の目標の編集タスクは始めない', () => {
-    const tasks = [task('a', 'g1', 1, 'done'), task('b', 'g2', 1)];
+  it('worktree の目標の編集タスクは、確認中の目標の修正と並行して始める', () => {
+    const tasks = [
+      task('a', 'g1', 1, 'done'),
+      task('fix', 'g1', 2, 'running', ['a']),
+      task('b', 'g2', 1),
+    ];
+    const g2 = { ...goal('g2'), worktreePath: '/worktrees/g2' };
+    expect(selectNextEditTask([goal('g1', 'review'), g2], tasks)?.id).toBe('b');
+  });
+
+  it('同じ worktree の編集タスクは1件ずつ実行する', () => {
+    const g1 = { ...goal('g1'), worktreePath: '/worktrees/g1' };
+    const tasks = [task('a', 'g1', 1), task('b', 'g1', 2), task('c', 'g2', 1)];
+    // 実行を始めたばかりで、まだ状態が「応答中」になっていないものも数える
+    expect(
+      selectNextEditTask([g1, goal('g2')], tasks, new Set(['a']))?.id,
+    ).toBe('c');
+    expect(
+      selectNextEditTask([g1], tasks.slice(0, 2), new Set(['a'])),
+    ).toBeNull();
+  });
+
+  it('ゲームを起動するディレクトリでは、確認中の目標の修正と worktree のない目標を1件ずつ実行する', () => {
+    const tasks = [task('fix', 'g1', 1, 'running'), task('b', 'g2', 1)];
     expect(
       selectNextEditTask([goal('g1', 'review'), goal('g2')], tasks),
     ).toBeNull();

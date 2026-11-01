@@ -2,7 +2,13 @@
  * Bridge の本体の流れ（計画 → 承認 → 実行 → 承認待ち → 確認待ち → 完了）を、
  * 偽のプロバイダーで確かめる。Codex は起動しない。
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +24,7 @@ import type {
   TurnInput,
   TurnResult,
 } from './providers/AiProvider';
+import { createTestRepo, type TestRepo } from './git/testRepo';
 import { BridgeStore } from './store/BridgeStore';
 
 /** 1回のターンで偽の AI が行うこと */
@@ -101,7 +108,7 @@ const planJson = JSON.stringify({
 });
 
 /** モデルと思考量の指定なし（設定の既定） */
-const DEFAULT_RUN = { model: null, effort: null };
+const DEFAULT_RUN = { profileId: null, model: null, effort: null };
 
 /** 承認待ちの、使わない項目の初期値 */
 const EMPTY_REQUEST = {
@@ -128,16 +135,19 @@ const untilCancelled: TurnScript = ({ signal }) =>
   });
 
 describe('BridgeCore', () => {
+  let repo: TestRepo;
   let dir: string;
   let provider: FakeProvider;
   let core: BridgeCore;
   let notifications: BridgeNotification[];
 
   beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), 'potamaid-bridge-'));
+    repo = createTestRepo();
+    dir = repo.dir;
     provider = new FakeProvider();
     core = new BridgeCore({
       databasePath: ':memory:',
+      worktreesDir: repo.worktreesDir,
       createProviders: () => [provider],
     });
     notifications = [];
@@ -146,8 +156,17 @@ describe('BridgeCore', () => {
 
   afterEach(async () => {
     await core.shutdown();
-    rmSync(dir, { recursive: true, force: true });
+    repo.cleanup();
   });
+
+  /** セッションの作業ディレクトリにファイルを書いてから、完了するターン */
+  const writing =
+    (file: string, content: string): TurnScript =>
+    async () => {
+      const cwd = provider.sessions.at(-1)?.cwd as string;
+      writeFileSync(path.join(cwd, file), content);
+      return completed(resultJson(false));
+    };
 
   const taskByNumber = (n: number) =>
     core.snapshot().tasks.find((t) => t.number === n);
@@ -160,6 +179,7 @@ describe('BridgeCore', () => {
     const project = await core.addProject(dir);
     provider.scripts.push(async () => completed(planJson));
     const goal = await core.createGoal(project.id, '粉砕機を追加したい', {
+      profileId: null,
       model: 'gpt-test',
       effort: 'high',
     });
@@ -311,7 +331,39 @@ describe('BridgeCore', () => {
     expect(provider.inputs[3]?.text).toContain('レシピは recipes/');
   });
 
-  it('確認中の目標がある間は、別の目標の編集タスクを始めない', async () => {
+  it('目標の worktree でタスクを実行し、タスクごとにコミットして、コミットしない変更として反映する', async () => {
+    const { goal } = await approvedGoal();
+    provider.scripts.push(
+      writing('block.txt', 'ブロック\n'),
+      writing('machine.txt', '処理\n'),
+    );
+    await core.approvePlan(goal.id);
+    const approved = core.snapshot().goals[0]!;
+    expect(approved.branch).toBe(`potamaid/goal-${goal.id.slice(0, 8)}`);
+    expect(approved.baseBranch).toBe('main');
+    // タスクの作業ディレクトリは目標の worktree
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    expect(provider.sessions[1]?.cwd).toBe(approved.workDir);
+    expect(provider.inputs[1]?.text).toContain('git worktree');
+    // Bridge がタスクごとにコミットする
+    expect(repo.git('log', '--format=%s', approved.branch!)).toBe(
+      'potamaid: #2 処理\npotamaid: #1 ブロック\ninit',
+    );
+    // ゲームを起動するディレクトリには、コミットしない変更として置く
+    expect(repo.git('log', '--format=%s', 'main')).toBe('init');
+    expect(readFileSync(path.join(dir, 'machine.txt'), 'utf8')).toBe('処理\n');
+    expect(repo.git('status', '--porcelain')).toContain('A  block.txt');
+
+    // 完了にすると worktree を消し、ブランチは残す
+    await core.markGoalDone(goal.id);
+    expect(existsSync(approved.worktreePath!)).toBe(false);
+    expect(core.snapshot().goals[0]?.worktreePath).toBeNull();
+    expect(repo.git('branch', '--list', approved.branch!)).toContain(
+      approved.branch!,
+    );
+  });
+
+  it('確認中の目標があれば、別の目標は worktree で実行を続けて反映を待ち、確認が終わってから反映する', async () => {
     const { goal: first } = await reviewedGoal();
     provider.scripts.push(async () => completed(planJson));
     const second = await core.createGoal(
@@ -320,19 +372,83 @@ describe('BridgeCore', () => {
       DEFAULT_RUN,
     );
     await vi.waitFor(() => expect(goalStatus(second.id)).toBe('planReview'));
-    await core.approvePlan(second.id);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const secondTasks = () =>
-      core.snapshot().tasks.filter((t) => t.goalId === second.id);
-    expect(secondTasks().map((t) => t.status)).toEqual(['todo', 'todo']);
-
-    // 完了にすると、別の目標の編集タスクを始める
-    provider.scripts.push(
-      async () => completed(resultJson(false)),
-      async () => completed(resultJson(false)),
+    provider.scripts.push(writing('second.txt', '別の目標\n'), async () =>
+      completed(resultJson(false)),
     );
+    await core.approvePlan(second.id);
+    await vi.waitFor(() => expect(goalStatus(second.id)).toBe('waiting'));
+    expect(core.snapshot().goals[1]?.waitReason).toContain('確認が終わる');
+    expect(existsSync(path.join(dir, 'second.txt'))).toBe(false);
+
+    // 反映待ちの目標は「反映する」でも、確認中の目標があるうちは反映しない
+    await expect(core.integrateGoal(second.id)).rejects.toThrow('確認が終わる');
     await core.markGoalDone(first.id);
     await vi.waitFor(() => expect(goalStatus(second.id)).toBe('review'));
+    expect(readFileSync(path.join(dir, 'second.txt'), 'utf8')).toBe(
+      '別の目標\n',
+    );
+  });
+
+  it('ゲームを起動するディレクトリにコミットしていない変更があれば、反映を止めて知らせ、「反映する」でやり直す', async () => {
+    const { goal } = await approvedGoal();
+    writeFileSync(path.join(dir, 'README.md'), '利用者の編集\n');
+    provider.scripts.push(writing('block.txt', 'ブロック\n'), async () =>
+      completed(resultJson(false)),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(goalStatus()).toBe('waiting'));
+    expect(core.snapshot().goals[0]?.waitReason).toContain(
+      'コミットしていない変更',
+    );
+    expect(notifications.at(-1)).toMatchObject({ kind: 'goalWaiting' });
+    expect(existsSync(path.join(dir, 'block.txt'))).toBe(false);
+
+    // 利用者がコミットしてから「反映する」を押す。分岐元の新しいコミットも取り込む
+    repo.git('commit', '-q', '-am', '利用者のコミット');
+    await core.integrateGoal(goal.id);
+    expect(goalStatus()).toBe('review');
+    expect(existsSync(path.join(dir, 'block.txt'))).toBe(true);
+    expect(notifications.at(-1)).toMatchObject({ kind: 'goalReview' });
+  });
+
+  it('分岐元の変更と競合したら、競合を解く重いタスクを追加して worktree で実行する', async () => {
+    const { goal } = await approvedGoal();
+    // 目標の実行中に、利用者が同じファイルを変えてコミットする
+    provider.scripts.push(
+      async (turn) => {
+        await writing('README.md', '目標の変更\n')(turn);
+        writeFileSync(path.join(dir, 'README.md'), '利用者の変更\n');
+        repo.git('commit', '-q', '-am', '利用者のコミット');
+        return completed(resultJson(false));
+      },
+      async () => completed(resultJson(false)),
+      writing('README.md', '目標の変更と利用者の変更\n'),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    const conflict = taskByNumber(3)!;
+    expect(conflict.title).toContain('競合の解消');
+    expect(conflict.weight).toBe('heavy');
+    expect(conflict.description).toContain('README.md');
+    expect(readFileSync(path.join(dir, 'README.md'), 'utf8')).toBe(
+      '目標の変更と利用者の変更\n',
+    );
+  });
+
+  it('git のリポジトリでない対象modの計画は承認できない', async () => {
+    const plain = mkdtempSync(path.join(tmpdir(), 'potamaid-plain-'));
+    try {
+      const project = await core.addProject(plain);
+      provider.scripts.push(async () => completed(planJson));
+      const goal = await core.createGoal(project.id, '目標', DEFAULT_RUN);
+      await vi.waitFor(() => expect(goalStatus(goal.id)).toBe('planReview'));
+      await expect(core.approvePlan(goal.id)).rejects.toThrow(
+        'git のリポジトリではありません',
+      );
+      expect(goalStatus(goal.id)).toBe('planReview');
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
   });
 
   it('目標への修正の指示は、修正のタスクを足して実行し、終わったらもう一度知らせる', async () => {
@@ -350,6 +466,9 @@ describe('BridgeCore', () => {
 
     await vi.waitFor(() => expect(taskByNumber(3)?.status).toBe('done'));
     expect(provider.sessions).toHaveLength(4);
+    // 確認中の修正は、ゲームを起動するディレクトリで実行する（2026-10-25 決定）
+    expect(provider.sessions.at(-1)?.cwd).toBe(dir);
+    expect(provider.inputs.at(-1)?.text).not.toContain('git worktree');
     expect(provider.inputs.at(-1)?.text).toContain('鉄鉱石が2倍にならない');
     expect(notifications).toHaveLength(1);
     expect(notifications[0]?.title).toContain('修正が終わりました');
@@ -411,6 +530,8 @@ describe('BridgeCore', () => {
         title: `調査${i}`,
         description: '調べる',
         kind: 'investigate',
+        weight: 'light',
+        profileId: null,
         dependsOn: [],
       });
     }
@@ -777,9 +898,87 @@ describe('BridgeCore', () => {
       title: t1.title,
       description: t1.description,
       kind: t1.kind,
+      weight: t1.weight,
+      profileId: null,
       dependsOn: [t2.id],
     });
     await expect(core.approvePlan(goal.id)).rejects.toThrow('循環');
+  });
+
+  it('重さに対応する実行の設定でタスクを実行し、使った設定とモデルを記録する', async () => {
+    await core.updateSettings({
+      profiles: [
+        {
+          id: 'heavy',
+          name: '重い',
+          providerId: 'codex',
+          model: 'gpt-heavy',
+          effort: 'xhigh',
+        },
+      ],
+    });
+    const { project, goal } = await approvedGoal();
+    await core.updateProject(project.id, {
+      weightProfiles: { heavy: 'heavy' },
+    });
+    const t1 = taskByNumber(1)!;
+    // AI が重さを付けなかったタスクは標準になる
+    expect(t1.weight).toBe('standard');
+    await core.updatePlanTask(t1.id, {
+      title: t1.title,
+      description: t1.description,
+      kind: t1.kind,
+      weight: 'heavy',
+      profileId: null,
+      dependsOn: [],
+    });
+
+    provider.scripts.push(
+      async () => completed(resultJson(false)),
+      async () => completed(resultJson(false)),
+    );
+    await core.approvePlan(goal.id);
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    // #1 は重さに対応する設定、#2 は重さの対応がないので目標の既定
+    expect(provider.sessions.slice(1).map((s) => [s.model, s.effort])).toEqual([
+      ['gpt-heavy', 'xhigh'],
+      ['gpt-test', 'high'],
+    ]);
+    expect(taskByNumber(1)?.runInfo).toMatchObject({
+      source: 'weight',
+      profileName: '重い',
+      model: 'gpt-heavy',
+    });
+    expect(taskByNumber(2)?.runInfo).toMatchObject({
+      source: 'goal',
+      profileId: null,
+      model: 'gpt-test',
+    });
+    // 実行したタスクの重さは変えられない
+    await expect(
+      core.updateTaskRun(t1.id, { weight: 'light', profileId: null }),
+    ).rejects.toThrow('未着手か失敗');
+  });
+
+  it('実行の設定には名前を求め、既定にしていた実行の設定を消したら既定を外す', async () => {
+    const fast = {
+      id: 'fast',
+      name: '速い',
+      providerId: 'codex' as const,
+      model: ' gpt-fast ',
+      effort: '',
+    };
+    await expect(
+      core.updateSettings({ profiles: [{ ...fast, name: ' ' }] }),
+    ).rejects.toThrow('名前を入力');
+    await core.updateSettings({ profiles: [fast], defaultProfileId: 'fast' });
+    expect(core.snapshot().settings).toMatchObject({
+      defaultProfileId: 'fast',
+      profiles: [{ id: 'fast', model: 'gpt-fast', effort: null }],
+    });
+    // 既定にしていた実行の設定を消したら、既定を外す
+    await core.updateSettings({ profiles: [] });
+    expect(core.snapshot().settings.defaultProfileId).toBeNull();
   });
 
   it('相談は読み取り専用で実行し、発言を途中経過に残す', async () => {
@@ -883,6 +1082,8 @@ describe('BridgeCore の起動時の後片付け', () => {
         name: 'p',
         rootPath: dir,
         readOnlyConcurrency: 2,
+        editConcurrency: 1,
+        weightProfiles: {},
         createdAt: 0,
       });
       store.goals.insert({
@@ -894,8 +1095,14 @@ describe('BridgeCore の起動時の後片付け', () => {
         planSummary: null,
         planError: null,
         providerId: 'codex',
+        profileId: null,
         model: null,
         effort: null,
+        branch: null,
+        baseBranch: null,
+        worktreePath: null,
+        workDir: null,
+        waitReason: null,
         roundStartedAt: null,
         createdAt: 0,
       });
@@ -907,6 +1114,9 @@ describe('BridgeCore の起動時の後片付け', () => {
           title: 't',
           description: '',
           kind: 'edit',
+          weight: 'standard',
+          profileId: null,
+          runInfo: null,
           status: 'running',
           paused: false,
           latest: '実行中',
@@ -925,6 +1135,7 @@ describe('BridgeCore の起動時の後片付け', () => {
       const provider = new FakeProvider();
       const core = new BridgeCore({
         databasePath,
+        worktreesDir: path.join(dir, 'worktrees'),
         createProviders: () => [provider],
       });
       core.start();

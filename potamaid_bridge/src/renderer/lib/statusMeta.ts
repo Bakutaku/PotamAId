@@ -7,7 +7,9 @@ import type {
   ProgressKind,
   ProviderState,
   TaskStatus,
+  TaskWeight,
 } from '../../shared/domain';
+import { WEIGHT_META } from './runOptions';
 import type { Tone } from './tone';
 
 export interface StatusMeta {
@@ -26,6 +28,18 @@ export const TASK_STATUS: Record<TaskStatus, StatusMeta> = {
 /** 調査タスクに付ける印 */
 export const INVESTIGATE_META: StatusMeta = { label: '調査', tone: 'info' };
 
+/** タスクの重さの印。重いほど目立つ色にする */
+const WEIGHT_TONE: Record<TaskWeight, Tone> = {
+  light: 'neutral',
+  standard: 'neutral',
+  heavy: 'warning',
+  max: 'error',
+};
+
+export function weightMeta(weight: TaskWeight): StatusMeta {
+  return { label: WEIGHT_META[weight].label, tone: WEIGHT_TONE[weight] };
+}
+
 /**
  * 目標の表示上の状態。
  * 確認中の目標は、修正を実行している間を「修正中」、それ以外を「確認待ち」と表示する
@@ -37,6 +51,7 @@ export const GOAL_STATUS: Record<GoalDisplayStatus, StatusMeta> = {
   planReview: { label: '計画の確認待ち', tone: 'warning' },
   planFailed: { label: '計画の失敗', tone: 'error' },
   active: { label: '進行中', tone: 'info' },
+  waiting: { label: '反映待ち', tone: 'warning' },
   review: { label: '確認待ち', tone: 'accent' },
   fixing: { label: '修正中', tone: 'info' },
   done: { label: '完了', tone: 'success' },

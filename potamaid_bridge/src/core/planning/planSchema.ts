@@ -4,7 +4,9 @@
  * 計画の作成では、AI の最後の発言を {@link PLAN_OUTPUT_SCHEMA} の JSON にさせ、
  * {@link parsePlan} で検証してからタスクとして保存する。
  */
-import type { TaskKind } from '../../shared/domain';
+import type { TaskKind, TaskWeight } from '../../shared/domain';
+import { TASK_WEIGHTS } from '../../shared/domain';
+import { normalizeWeight } from '../../shared/runConfig';
 import { checkTaskGraph, sortByDependencies } from './taskGraph';
 
 /** AI が返す計画 */
@@ -22,6 +24,8 @@ export interface PlanTaskOutput {
   title: string;
   description: string;
   kind: TaskKind;
+  /** タスクの重さ。実行に使うモデルを決めるのに使う（仕様書6章） */
+  weight: TaskWeight;
   dependsOn: string[];
 }
 
@@ -49,7 +53,14 @@ export const PLAN_OUTPUT_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['key', 'title', 'description', 'kind', 'dependsOn'],
+        required: [
+          'key',
+          'title',
+          'description',
+          'kind',
+          'weight',
+          'dependsOn',
+        ],
         properties: {
           key: { type: 'string', description: 't1, t2 のような識別子' },
           title: { type: 'string', description: 'タスクの短い題名' },
@@ -63,6 +74,12 @@ export const PLAN_OUTPUT_SCHEMA: Record<string, unknown> = {
             enum: TASK_KINDS,
             description:
               'edit: ファイルを編集するタスク。investigate: 読み取り専用で調べるだけのタスク',
+          },
+          weight: {
+            type: 'string',
+            enum: TASK_WEIGHTS,
+            description:
+              'タスクの難しさ。light: 翻訳の追加や単純な登録など定型的で小さい。standard: ふつうの実装や調査。heavy: 複数のファイルにまたがる設計や、原因の分かりにくい不具合。max: 全体の設計を左右する、特に難しいもの',
           },
           dependsOn: {
             type: 'array',
@@ -117,7 +134,10 @@ export function parsePlan(text: string | null): ParseResult<PlanOutput> {
     value: {
       goalTitle: value.goalTitle.trim(),
       summary: value.summary.trim(),
-      tasks: sortByDependencies(nodes).map(({ id: _id, ...task }) => task),
+      tasks: sortByDependencies(nodes).map(({ id: _id, ...task }) => ({
+        ...task,
+        weight: normalizeWeight(task.weight),
+      })),
     },
   };
 }
@@ -141,6 +161,10 @@ function isPlanOutput(value: unknown): value is PlanOutput {
   );
 }
 
+/**
+ * 計画のタスクの形を確かめる。
+ * 重さは、構造化出力を守り切れないモデルもあるため、欠けていたり知らない値だったりしたら標準として扱う
+ */
 function isPlanTask(value: unknown): value is PlanTaskOutput {
   if (typeof value !== 'object' || value === null) {
     return false;

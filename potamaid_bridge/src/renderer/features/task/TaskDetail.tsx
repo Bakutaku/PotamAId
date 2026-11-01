@@ -1,9 +1,16 @@
 /**
  * タスクの詳細（ボードのカードを選ぶと右に開く）。
- * 内容と依存関係、途中経過、承認、中止、追加の指示。
+ * 内容と依存関係、使う（使った）実行の設定、途中経過、承認、中止、追加の指示。
+ * 未着手・失敗のタスクは、重さと実行の設定を変えられる。
  * 確認は目標の単位で行うため、タスクごとの「完了にする」はない。
  */
-import type { Approval, Goal, Task } from '../../../shared/domain';
+import type {
+  Approval,
+  ExecutionProfile,
+  Goal,
+  Task,
+  TaskWeight,
+} from '../../../shared/domain';
 import { bridge } from '../../api/bridge';
 import { Icon } from '../../components/Icon';
 import { IconButton } from '../../components/IconButton';
@@ -16,11 +23,13 @@ import {
   describeTask,
   isGoalStarted,
 } from '../../lib/selectors';
+import { WEIGHT_META } from '../../lib/runOptions';
 import { INVESTIGATE_META, TASK_STATUS } from '../../lib/statusMeta';
 import { useProgressEvents } from '../../state/useProgressEvents';
 import { useRunAction } from '../../state/Toasts';
 import { useUiState } from '../../state/UiState';
 import { InlineApprovals } from '../approvals/InlineApprovals';
+import { TaskRunFields } from './TaskRunFields';
 
 export function TaskDetail({
   goal,
@@ -28,13 +37,20 @@ export function TaskDetail({
   tasks,
   approvals,
   runLabel,
+  profiles,
+  describeRun,
 }: {
   goal: Goal;
   task: Task;
   tasks: Task[];
   /** このタスクの承認待ち */
   approvals: Approval[];
+  /** 実際に使った（まだなら使う予定の）実行の設定とモデルの説明 */
   runLabel: string;
+  /** 登録した実行の設定 */
+  profiles: ExecutionProfile[];
+  /** 重さと実行の設定から、使う設定の説明を求める */
+  describeRun(run: { weight: TaskWeight; profileId: string | null }): string;
 }) {
   const run = useRunAction();
   const { selectTask } = useUiState();
@@ -42,6 +58,7 @@ export function TaskDetail({
   const canStop = task.status === 'running' || task.status === 'approval';
   const instructable = isGoalStarted(goal);
   const investigate = task.kind === 'investigate';
+  const runEditable = task.status === 'todo' || task.status === 'failed';
 
   return (
     <section
@@ -92,9 +109,26 @@ export function TaskDetail({
             <span className="whitespace-pre-wrap">{task.description}</span>
           )}
           <span className="text-[11px] text-muted">
-            {dependencyText(task, tasks)}・{runLabel}
+            {dependencyText(task, tasks)}・重さ {WEIGHT_META[task.weight].label}
           </span>
+          {task.runInfo && (
+            <span className="text-[11px] text-muted">
+              {runEditable ? '前回の実行' : '実行'}: {runLabel}
+            </span>
+          )}
         </div>
+
+        {runEditable && (
+          <TaskRunFields
+            weight={task.weight}
+            profileId={task.profileId}
+            profiles={profiles}
+            onChange={(input) =>
+              void run(() => bridge.updateTaskRun(task.id, input))
+            }
+            summary={describeRun(task)}
+          />
+        )}
 
         <ProgressEventList events={events} />
 

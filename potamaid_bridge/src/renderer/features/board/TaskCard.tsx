@@ -1,5 +1,6 @@
 import type { Task } from '../../../shared/domain';
 import { StatusBadge } from '../../components/StatusBadge';
+import { WEIGHT_META, shortRunLabel } from '../../lib/runOptions';
 import { describeTask } from '../../lib/selectors';
 import { INVESTIGATE_META, TASK_STATUS } from '../../lib/statusMeta';
 
@@ -59,6 +60,12 @@ export function TaskCard({
       {subtitle && (
         <span className="line-clamp-2 text-xs text-muted">{subtitle}</span>
       )}
+      {/* 実行したタスクは実際に使った設定とモデル、まだのタスクは重さを出す */}
+      <span className="truncate text-[11px] text-muted">
+        {task.runInfo
+          ? shortRunLabel(task.runInfo)
+          : `重さ: ${WEIGHT_META[task.weight].label}`}
+      </span>
     </button>
   );
 }

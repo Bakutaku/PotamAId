@@ -4,10 +4,20 @@
  * 未着手 → 応答中 ⇄ 承認待ち → 完了 の流れを担う。
  * タスクごとに新しいセッションを使い、最初のターンで目標と計画、依存先の結果を添える。
  * 追加の指示が溜まっていれば、同じセッションで続けてターンを実行する。
- * 目標のタスクがすべて完了したら、目標を確認待ちにして知らせる（仕様書3章）。
+ *
+ * 進行中の目標のタスクは目標の worktree で実行し、編集タスクが終わるたびに Bridge がコミットする。
+ * 確認中・完了の目標の修正は、ゲームを起動するディレクトリで実行する（2026-10-25 決定）。
+ * 目標のタスクがすべて完了したら、worktree の目標は反映（{@link GoalIntegrator}）に回し、
+ * それ以外は目標を確認待ちにして知らせる（仕様書3章）。
  */
-import type { ProgressOwner } from '../../shared/domain';
+import type { Goal, Project, ProgressOwner, Task } from '../../shared/domain';
 import { isGoalWorkFinished, restartRequiredTasks } from '../../shared/goals';
+import {
+  resolveFollowUpRun,
+  resolveOwnerRun,
+  resolveTaskRun,
+  toRunInfo,
+} from '../../shared/runConfig';
 import {
   INVESTIGATE_INSTRUCTIONS,
   TASK_INSTRUCTIONS,
@@ -19,13 +29,19 @@ import {
   TASK_RESULT_SCHEMA,
   parseTaskResult,
 } from '../planning/taskResultSchema';
+import type { GoalWorkspaces } from '../git/GoalWorkspaces';
 import type { AiSession } from '../providers/AiProvider';
+import { notifyGoalReview, type GoalIntegrator } from './GoalIntegrator';
 import type { RunnerContext } from './RunnerContext';
 
 export const taskRunKey = (taskId: string) => `task:${taskId}`;
 
 export class TaskRunner {
-  constructor(private readonly ctx: RunnerContext) {}
+  constructor(
+    private readonly ctx: RunnerContext,
+    private readonly workspaces: GoalWorkspaces,
+    private readonly integrator: GoalIntegrator,
+  ) {}
 
   async run(taskId: string): Promise<void> {
     const key = taskRunKey(taskId);
@@ -33,6 +49,8 @@ export class TaskRunner {
     const { store } = this.ctx;
 
     this.ctx.beginRun(key);
+    /** 編集の結果をコミットする worktree（ゲームを起動するディレクトリで実行するときは null） */
+    let commitTo: { path: string; task: Task } | null = null;
     try {
       const task = store.tasks.get(taskId);
       const goal = store.goals.get(task.goalId);
@@ -41,6 +59,10 @@ export class TaskRunner {
         throw new Error('対象modが見つかりません');
       }
       const investigate = task.kind === 'investigate';
+      const workDir = taskWorkDir(goal, project);
+      if (!investigate && goal.worktreePath && workDir !== project.rootPath) {
+        commitTo = { path: goal.worktreePath, task };
+      }
       const existingSessionId = store.tasks.getSessionId(taskId);
       let instructions = store.tasks.peekInstructions(taskId);
       store.tasks.update(taskId, {
@@ -51,17 +73,24 @@ export class TaskRunner {
       });
       this.ctx.changed();
 
-      const provider = this.ctx.providers.get(goal.providerId);
+      // 追加の指示は同じセッションの続きなので、前回の実行の設定を使う（仕様書6章）
+      const settings = this.ctx.getSettings();
+      // （実行の設定を記録する前に始めたタスクは、以前と同じく目標の指定で続ける）
+      const runConfig = !existingSessionId
+        ? resolveTaskRun(task, goal, project, settings)
+        : task.runInfo
+          ? resolveFollowUpRun(task.runInfo, settings)
+          : resolveOwnerRun(goal, settings);
+      const { provider, options: runOptions } = this.ctx.prepareRun(runConfig);
       const options = {
-        cwd: project.rootPath,
+        cwd: workDir,
         access: investigate
           ? ('readOnly' as const)
           : ('workspaceWrite' as const),
         instructions: investigate
           ? INVESTIGATE_INSTRUCTIONS
           : TASK_INSTRUCTIONS,
-        model: goal.model,
-        effort: goal.effort,
+        ...runOptions,
         mcpServers: await this.ctx.mcpServers({ type: 'goal', id: goal.id }),
       };
       const outputSchema = investigate
@@ -74,12 +103,17 @@ export class TaskRunner {
         prompt = buildFollowUpPrompt(instructions.map((i) => i.text));
       } else {
         session = await provider.startSession(options);
-        store.tasks.update(taskId, { sessionId: session.sessionId });
+        store.tasks.update(taskId, {
+          sessionId: session.sessionId,
+          runInfo: toRunInfo(runConfig, session),
+        });
+        this.ctx.changed();
         prompt = buildTaskPrompt(
           goal,
           store.tasks.listByGoal(goal.id),
           task,
           instructions.map((i) => i.text),
+          workDir !== project.rootPath,
         );
       }
 
@@ -112,6 +146,7 @@ export class TaskRunner {
           return;
         }
         if (result.status === 'interrupted') {
+          await this.commitPartial(commitTo, '中止');
           this.resetToTodo(
             taskId,
             '中止しました。再開するまで停止します。',
@@ -120,6 +155,7 @@ export class TaskRunner {
           return;
         }
         if (result.status === 'failed') {
+          await this.commitPartial(commitTo, '失敗');
           this.fail(taskId, result.error ?? 'AI の実行に失敗しました');
           return;
         }
@@ -141,6 +177,13 @@ export class TaskRunner {
         prompt = buildFollowUpPrompt(instructions.map((i) => i.text));
       }
 
+      if (commitTo) {
+        // コミットできなければ、次のタスクの変更と混ざらないよう失敗にする
+        await this.workspaces.commit(
+          commitTo.path,
+          commitMessage(commitTo.task),
+        );
+      }
       store.tasks.update(taskId, {
         status: 'done',
         finishedAt: Date.now(),
@@ -150,6 +193,10 @@ export class TaskRunner {
       this.finishGoalIfDone(goal.id);
     } catch (error) {
       if (!this.ctx.closing) {
+        await this.commitPartial(
+          commitTo,
+          this.ctx.isCancelRequested(key) ? '中止' : '失敗',
+        );
         if (this.ctx.isCancelRequested(key)) {
           this.resetToTodo(
             taskId,
@@ -166,6 +213,31 @@ export class TaskRunner {
     } finally {
       this.ctx.broker.cancelForOwner(owner);
       this.ctx.endRun(key);
+    }
+  }
+
+  /**
+   * 中止・失敗したタスクの途中までの変更をコミットする。
+   * 同じ目標の次のタスクのコミットに混ざらないようにするため。失敗しても実行の結果は変えない
+   */
+  private async commitPartial(
+    commitTo: { path: string; task: Task } | null,
+    label: string,
+  ): Promise<void> {
+    if (!commitTo || this.ctx.closing) {
+      return;
+    }
+    try {
+      await this.workspaces.commit(
+        commitTo.path,
+        `${commitMessage(commitTo.task)}（${label}・途中まで）`,
+      );
+    } catch (error) {
+      this.ctx.record(
+        { type: 'task', id: commitTo.task.id },
+        'error',
+        `途中までの変更をコミットできませんでした: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -212,8 +284,8 @@ export class TaskRunner {
   }
 
   /**
-   * 目標のタスクの作業がすべて終わったら、目標を確認待ちにして知らせる。
-   * 確認中の目標の修正が終わったときも、もう一度知らせる。
+   * 目標のタスクの作業がすべて終わったら、worktree の目標は反映に回す。
+   * それ以外（確認中の目標の修正、worktree を持たない以前の目標）は、目標を確認待ちにして知らせる。
    */
   private finishGoalIfDone(goalId: string): void {
     const { store } = this.ctx;
@@ -225,24 +297,27 @@ export class TaskRunner {
     if (!isGoalWorkFinished(tasks)) {
       return;
     }
+    if (goal.status === 'active' && goal.worktreePath) {
+      void this.integrator.request(goalId);
+      return;
+    }
     store.goals.setStatus(goalId, 'review');
     this.ctx.changed();
-
-    const restart = restartRequiredTasks(goal, tasks);
-    const restartText =
-      restart.length > 0
-        ? `反映にはゲームの再起動が必要です（${restart.map((t) => `#${t.number}`).join('・')}）。`
-        : '';
-    this.ctx.notify({
-      kind: 'goalReview',
-      title: `${goal.status === 'active' ? 'タスクがすべて終わりました' : '修正が終わりました'}: ${goal.title}`,
-      body: `ゲーム内や VS Code で動作を確かめてください。${restartText}`,
-      target: {
-        type: 'showGoal',
-        projectId: goal.projectId,
-        goalId,
-        taskId: null,
-      },
-    });
+    notifyGoalReview(this.ctx, goal, tasks, goal.status === 'review');
   }
+}
+
+/**
+ * タスクの作業ディレクトリ。
+ * 進行中の目標は目標の worktree、確認中・完了の目標の修正はゲームを起動するディレクトリ
+ */
+export function taskWorkDir(goal: Goal, project: Project): string {
+  return goal.status === 'active' && goal.worktreePath && goal.workDir
+    ? goal.workDir
+    : project.rootPath;
+}
+
+/** タスクごとのコミットのメッセージ */
+function commitMessage(task: Task): string {
+  return `potamaid: #${task.number} ${task.title}`;
 }

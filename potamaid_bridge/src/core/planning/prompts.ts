@@ -28,8 +28,9 @@ export const PLAN_INSTRUCTIONS = `${COMMON}
 
 ファイルを変更せずにコードを調べ、ユーザーの目標を実装の単位のタスクに分けた計画を作ってください。
 - 各タスクは別々の新しいセッションで実行します。1つのセッションで終わる大きさにしてください。
-- edit は対象modごとに1件ずつ、investigate は読み取り専用で並行して実行します。調査タスクは、実装の前に広く調べる必要があるときだけ作ってください。
-- タスクはユーザーの確認なしに続けて実行し、ユーザーは最後にまとめて動作を確かめます。`;
+- edit は目標ごとの作業用のコピー（git worktree）で1件ずつ、investigate は読み取り専用で並行して実行します。調査タスクは、実装の前に広く調べる必要があるときだけ作ってください。
+- タスクはユーザーの確認なしに続けて実行し、ユーザーは最後にまとめて動作を確かめます。
+- weight はタスクの難しさです。実行に使うモデルは、Bridge が weight と利用者の設定から決めます。`;
 
 /** 編集タスクの実行（作業ディレクトリの編集あり） */
 export const TASK_INSTRUCTIONS = `${COMMON}
@@ -49,6 +50,14 @@ export const INVESTIGATE_INSTRUCTIONS = `${COMMON}
 export const CONSULT_INSTRUCTIONS = `${COMMON}
 
 ユーザーの質問に答えてください。ファイルは変更せず、実装が必要な内容は手順や方針の説明にとどめてください。`;
+
+/**
+ * 目標の worktree で実行するときの注意（仕様書3章「worktree での並行実行」）。
+ * つながるゲームはゲームを起動するディレクトリのコードで動いているため、ゲームの MCP では確かめられない
+ */
+const WORKTREE_NOTE = `作業ディレクトリは、この目標のための作業用のコピー（git worktree）で、ゲームを起動するディレクトリとは別です。
+- ゲームの MCP ではこのコピーの変更を確かめられません。コンパイルや、このコピーから起動する GameTest で確かめてください。
+- run/ など git で管理していないファイルはありません。初回のビルドには時間がかかります。`;
 
 /** 計画の作成の最初のターン */
 export function buildPlanPrompt(goal: Goal): string {
@@ -76,7 +85,7 @@ ${goal.text}
 ${instruction}
 
 # いまの計画（ユーザーが編集した内容を含む）
-${currentTasks.map((t) => `${taskLine(t, currentTasks)}: ${t.description}`).join('\n')}`;
+${currentTasks.map((t) => `${taskLine(t, currentTasks)}［weight: ${t.weight}］: ${t.description}`).join('\n')}`;
 }
 
 /**
@@ -89,6 +98,8 @@ export function buildTaskPrompt(
   tasks: Task[],
   task: Task,
   instructions: string[],
+  /** 目標の worktree で実行するか */
+  inWorktree = false,
 ): string {
   const investigate = task.kind === 'investigate';
   const results = tasks
@@ -103,6 +114,7 @@ export function buildTaskPrompt(
     `# 今回のタスク: #${task.number} ${task.title}\n${task.description}`,
     instructions.length > 0 &&
       `# ユーザーからの追加の指示\n${bulletList(instructions)}`,
+    inWorktree && `# 作業ディレクトリ\n${WORKTREE_NOTE}`,
   ].filter(Boolean);
   return `${task.title}（${goal.title} / #${task.number}・${investigate ? '調査' : '実装'}）
 

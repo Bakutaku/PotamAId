@@ -44,6 +44,21 @@ describe('parsePlan', () => {
     ]);
   });
 
+  it('タスクの重さを読み、欠けていたり知らない値だったりすれば標準にする', () => {
+    const result = parsePlan(
+      plan([
+        { ...task('t1'), weight: 'heavy' },
+        { ...task('t2'), weight: 'extreme' },
+        task('t3'),
+      ] as ReturnType<typeof task>[]),
+    );
+    expect(result.ok && result.value.tasks.map((t) => t.weight)).toEqual([
+      'heavy',
+      'standard',
+      'standard',
+    ]);
+  });
+
   it('知らない種類のタスクがあれば失敗する', () => {
     const unknown = { ...task('t1'), kind: 'deploy' };
     expect(

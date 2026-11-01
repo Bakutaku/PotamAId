@@ -7,6 +7,8 @@ export const DEFAULT_SETTINGS: Settings = {
   codexPath: '',
   codexModel: '',
   codexEffort: '',
+  profiles: [],
+  defaultProfileId: null,
   requestTimeoutSeconds: 60,
   turnIdleTimeoutMinutes: 10,
   desktopNotifications: true,

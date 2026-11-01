@@ -1,13 +1,20 @@
 import { useEffect, useId, useState } from 'react';
-import type { Task, TaskKind } from '../../../shared/domain';
+import type {
+  ExecutionProfile,
+  Task,
+  TaskKind,
+  TaskWeight,
+} from '../../../shared/domain';
 import type { PlanTaskInput } from '../../../shared/ipc';
 import { Dialog } from '../../components/Dialog';
+import { TaskRunFields } from '../task/TaskRunFields';
 
 const KIND_OPTIONS: { kind: TaskKind; label: string; description: string }[] = [
   {
     kind: 'edit',
     label: '編集',
-    description: 'ファイルを編集する。対象modごとに 1 件ずつ実行する',
+    description:
+      'ファイルを編集する。目標ごとの worktree で 1 件ずつ実行し、タスクごとにコミットする',
   },
   {
     kind: 'investigate',
@@ -23,16 +30,22 @@ interface PlanTaskEditorProps {
   task: Task | null;
   /** 同じ目標のタスク（依存先の候補） */
   tasks: Task[];
+  /** 登録した実行の設定 */
+  profiles: ExecutionProfile[];
+  /** 重さと実行の設定から、使う設定の説明を求める */
+  describeRun(run: { weight: TaskWeight; profileId: string | null }): string;
   onClose(): void;
   /** 保存する。true を返したら閉じる */
   onSave(input: PlanTaskInput): Promise<boolean>;
 }
 
-/** 計画のタスクを追加・編集するダイアログ（題名・内容・種類・依存するタスク） */
+/** 計画のタスクを追加・編集するダイアログ（題名・内容・種類・重さと実行の設定・依存するタスク） */
 export function PlanTaskEditor({
   open,
   task,
   tasks,
+  profiles,
+  describeRun,
   onClose,
   onSave,
 }: PlanTaskEditorProps) {
@@ -42,6 +55,9 @@ export function PlanTaskEditor({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [kind, setKind] = useState<TaskKind>('edit');
+  // 利用者が追加するタスクは、AI が重さを付けないため標準にする（2026-10-25 決定）
+  const [weight, setWeight] = useState<TaskWeight>('standard');
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -52,6 +68,8 @@ export function PlanTaskEditor({
       setTitle(task?.title ?? '');
       setDescription(task?.description ?? '');
       setKind(task?.kind ?? 'edit');
+      setWeight(task?.weight ?? 'standard');
+      setProfileId(task?.profileId ?? null);
       setDependsOn(task?.dependsOn ?? []);
     }
   }, [open, task?.id]); // oxlint-disable-line react-hooks/exhaustive-deps
@@ -65,7 +83,16 @@ export function PlanTaskEditor({
   const save = async () => {
     setSaving(true);
     try {
-      if (await onSave({ title, description, kind, dependsOn })) {
+      if (
+        await onSave({
+          title,
+          description,
+          kind,
+          weight,
+          profileId,
+          dependsOn,
+        })
+      ) {
         onClose();
       }
     } finally {
@@ -135,6 +162,16 @@ export function PlanTaskEditor({
           </label>
         ))}
       </fieldset>
+      <TaskRunFields
+        weight={weight}
+        profileId={profileId}
+        profiles={profiles}
+        onChange={(run) => {
+          setWeight(run.weight);
+          setProfileId(run.profileId);
+        }}
+        summary={describeRun({ weight, profileId })}
+      />
       {candidates.length > 0 && (
         <fieldset className="flex flex-col gap-1">
           <legend className="mb-1 font-medium">先に完了しているタスク</legend>

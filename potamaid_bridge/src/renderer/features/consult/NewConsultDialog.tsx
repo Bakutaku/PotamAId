@@ -58,6 +58,7 @@ export function NewConsultDialog({
         value={options}
         onChange={setOptions}
         models={provider?.models ?? []}
+        profiles={settings.profiles}
         defaultModel={defaultModelOf(settings, provider)}
         defaultLabel="設定の既定"
       />
@@ -65,4 +66,8 @@ export function NewConsultDialog({
   );
 }
 
-const EMPTY_OPTIONS: RunOptions = { model: null, effort: null };
+const EMPTY_OPTIONS: RunOptions = {
+  profileId: null,
+  model: null,
+  effort: null,
+};

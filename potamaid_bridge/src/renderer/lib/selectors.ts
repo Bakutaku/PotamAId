@@ -54,6 +54,7 @@ export function goalDisplayStatus(
 export function isGoalStarted(goal: Goal): boolean {
   return (
     goal.status === 'active' ||
+    goal.status === 'waiting' ||
     goal.status === 'review' ||
     goal.status === 'done'
   );

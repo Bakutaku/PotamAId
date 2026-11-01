@@ -25,7 +25,7 @@ export interface SessionOptions {
   access: AccessMode;
   /** セッション全体に与える指示（役割や守ること） */
   instructions?: string;
-  /** 使うモデル。null ならプロバイダーの設定の既定 */
+  /** 使うモデル。null ならプロバイダーの設定の既定（Bridge の設定の既定は呼び出し元で決める） */
   model?: string | null;
   /** 思考量（reasoning effort）。null ならモデルの既定 */
   effort?: string | null;
@@ -97,6 +97,9 @@ export interface TurnHandle {
 export interface AiSession {
   /** プロバイダーのセッション ID（Codex はスレッド ID）。保存して再開に使う */
   readonly sessionId: string;
+  /** プロバイダーが実際に使うモデルと思考量（分からなければ undefined）。タスクに記録する */
+  readonly model?: string | null;
+  readonly effort?: string | null;
   runTurn(input: TurnInput, handlers: TurnHandlers): TurnHandle;
 }
 

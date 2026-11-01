@@ -133,21 +133,24 @@ export class BridgeTray {
 function summarize(snapshot: BridgeSnapshot): string {
   const runs = Object.values(snapshot.runs);
   const edit = runs.reduce((sum, r) => sum + r.edit, 0);
+  const editLimit = runs.reduce((sum, r) => sum + r.editLimit, 0);
   const readOnly = runs.reduce((sum, r) => sum + r.readOnly, 0);
   const queued = runs.reduce((sum, r) => sum + r.queued, 0);
-  return `編集 ${edit} / ${snapshot.projects.length}・読み取り ${readOnly}${queued > 0 ? `（順番待ち ${queued}）` : ''}`;
+  return `編集 ${edit} / ${editLimit}・読み取り ${readOnly}${queued > 0 ? `（順番待ち ${queued}）` : ''}`;
 }
 
-/** 承認待ちのほかに、ユーザーの対応を待っているもの（確認待ちの目標・失敗したタスク） */
+/** 承認待ちのほかに、ユーザーの対応を待っているもの（確認待ち・反映待ちの目標、失敗したタスク） */
 function attentionLines(snapshot: BridgeSnapshot): string[] {
   const reviewing = snapshot.goals.filter(
     (g) =>
       g.status === 'review' &&
       isGoalWorkFinished(snapshot.tasks.filter((t) => t.goalId === g.id)),
   ).length;
+  const waiting = snapshot.goals.filter((g) => g.status === 'waiting').length;
   const failed = snapshot.tasks.filter((t) => t.status === 'failed').length;
   return [
     reviewing > 0 ? `確認待ちの目標 ${reviewing} 件` : '',
+    waiting > 0 ? `反映待ちの目標 ${waiting} 件` : '',
     failed > 0 ? `失敗したタスク ${failed} 件` : '',
   ];
 }

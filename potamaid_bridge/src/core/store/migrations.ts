@@ -123,4 +123,26 @@ export const MIGRATIONS: readonly string[] = [
   `,
   // 中止したタスクを、手動で再開するまで自動実行の対象から外す
   `ALTER TABLE tasks ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;`,
+  // 実行の設定（プロファイル）とタスクの重さ（仕様書6章「実行の設定とモデルの選び方」）。
+  // 目標・相談の model・effort は、そのまま目標・相談の既定として使う
+  `
+  ALTER TABLE projects ADD COLUMN weight_profiles TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE goals ADD COLUMN profile_id TEXT;
+  ALTER TABLE consults ADD COLUMN profile_id TEXT;
+  ALTER TABLE tasks ADD COLUMN weight TEXT NOT NULL DEFAULT 'standard';
+  -- タスクで直接指定した実行の設定
+  ALTER TABLE tasks ADD COLUMN profile_id TEXT;
+  -- 最後の実行で実際に使った設定とモデル（JSON）
+  ALTER TABLE tasks ADD COLUMN run_info TEXT;
+  `,
+  // 目標ごとの worktree での並行実行（仕様書3章「worktree での並行実行」）。
+  // それまでの目標は worktree を持たず、ゲームを起動するディレクトリで実行する
+  `
+  ALTER TABLE projects ADD COLUMN edit_concurrency INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE goals ADD COLUMN branch TEXT;
+  ALTER TABLE goals ADD COLUMN base_branch TEXT;
+  ALTER TABLE goals ADD COLUMN worktree_path TEXT;
+  ALTER TABLE goals ADD COLUMN work_dir TEXT;
+  ALTER TABLE goals ADD COLUMN wait_reason TEXT;
+  `,
 ];

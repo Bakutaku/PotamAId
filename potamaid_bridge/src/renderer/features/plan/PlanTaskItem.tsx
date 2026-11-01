@@ -2,17 +2,20 @@ import type { Task } from '../../../shared/domain';
 import { IconButton } from '../../components/IconButton';
 import { StatusBadge } from '../../components/StatusBadge';
 import { dependencyText } from '../../lib/selectors';
-import { INVESTIGATE_META } from '../../lib/statusMeta';
+import { INVESTIGATE_META, weightMeta } from '../../lib/statusMeta';
 
 /** 計画の確認のタスクの1件 */
 export function PlanTaskItem({
   task,
   tasks,
+  runLabel,
   onEdit,
   onRemove,
 }: {
   task: Task;
   tasks: Task[];
+  /** 使う実行の設定の説明 */
+  runLabel: string;
   onEdit(): void;
   onRemove(): void;
 }) {
@@ -27,12 +30,13 @@ export function PlanTaskItem({
           {task.kind === 'investigate' && (
             <StatusBadge meta={INVESTIGATE_META} />
           )}
+          <StatusBadge meta={weightMeta(task.weight)} />
         </span>
         <span className="text-xs whitespace-pre-wrap text-muted">
           {task.description}
         </span>
         <span className="text-[11px] text-muted">
-          {dependencyText(task, tasks)}
+          {dependencyText(task, tasks)}・{runLabel}
         </span>
       </span>
       <IconButton

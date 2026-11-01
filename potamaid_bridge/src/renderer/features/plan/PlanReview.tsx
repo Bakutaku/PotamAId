@@ -3,8 +3,16 @@
  * タスクの編集・削除・追加、指示を足しての作り直し、承認ができる。
  */
 import { useState } from 'react';
-import type { Goal, Task } from '../../../shared/domain';
+import type {
+  Goal,
+  Project,
+  ProviderStatus,
+  Settings,
+  Task,
+  TaskWeight,
+} from '../../../shared/domain';
 import { bridge } from '../../api/bridge';
+import { describeTaskPlan } from '../../lib/runOptions';
 import { ChatBubble } from '../../components/ChatBubble';
 import { Icon } from '../../components/Icon';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -17,11 +25,29 @@ import { PlanTaskItem } from './PlanTaskItem';
 /** 編集中のタスク。null は追加、undefined は閉じている */
 type Editing = Task | null | undefined;
 
-export function PlanReview({ goal, tasks }: { goal: Goal; tasks: Task[] }) {
+export function PlanReview({
+  goal,
+  tasks,
+  project,
+  settings,
+  provider,
+}: {
+  goal: Goal;
+  tasks: Task[];
+  project: Project | undefined;
+  settings: Settings;
+  /** 目標のプロバイダー（モデルの表示名に使う） */
+  provider: ProviderStatus | undefined;
+}) {
   const run = useRunAction();
   const [editing, setEditing] = useState<Editing>(undefined);
   const [replanOpen, setReplanOpen] = useState(false);
   const [approving, setApproving] = useState(false);
+  /** 重さと実行の設定から、使う設定の説明を求める */
+  const describeRun = (task: {
+    weight: TaskWeight;
+    profileId: string | null;
+  }) => describeTaskPlan(task, goal, project, settings, provider);
 
   const approve = async () => {
     setApproving(true);
@@ -41,7 +67,9 @@ export function PlanReview({ goal, tasks }: { goal: Goal; tasks: Task[] }) {
       <ChatBubble from="user" text={goal.text} />
       {goal.planSummary && <ChatBubble from="ai" text={goal.planSummary} />}
       <div role="note" className="rounded-field bg-info/10 px-3 py-2.5">
-        必要ならタスクを直してから承認してください。承認すると依存関係の順に実行し、すべて終わったらお知らせします。
+        必要ならタスクを直してから承認してください。承認すると目標のブランチと
+        worktree
+        を作って依存関係の順に実行し、すべて終わったらゲームを起動するディレクトリに反映してお知らせします。
       </div>
       {goal.planError && (
         <div role="alert" className="alert alert-error alert-soft">
@@ -55,6 +83,7 @@ export function PlanReview({ goal, tasks }: { goal: Goal; tasks: Task[] }) {
             key={task.id}
             task={task}
             tasks={tasks}
+            runLabel={describeRun(task)}
             onEdit={() => setEditing(task)}
             onRemove={() => void run(() => bridge.removePlanTask(task.id))}
           />
@@ -91,6 +120,8 @@ export function PlanReview({ goal, tasks }: { goal: Goal; tasks: Task[] }) {
         open={editing !== undefined}
         task={editing ?? null}
         tasks={tasks}
+        profiles={settings.profiles}
+        describeRun={describeRun}
         onClose={() => setEditing(undefined)}
         onSave={(input) =>
           run(() =>

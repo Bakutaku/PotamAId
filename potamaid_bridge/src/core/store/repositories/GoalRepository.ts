@@ -11,11 +11,23 @@ interface GoalRow {
   plan_error: string | null;
   plan_session_id: string | null;
   provider_id: string;
+  profile_id: string | null;
   model: string | null;
   effort: string | null;
+  branch: string | null;
+  base_branch: string | null;
+  worktree_path: string | null;
+  work_dir: string | null;
+  wait_reason: string | null;
   round_started_at: number | null;
   created_at: number;
 }
+
+/** 目標の worktree の情報 */
+export type GoalWorktree = Pick<
+  Goal,
+  'branch' | 'baseBranch' | 'worktreePath' | 'workDir'
+>;
 
 const toGoal = (row: GoalRow): Goal => ({
   id: row.id,
@@ -26,8 +38,14 @@ const toGoal = (row: GoalRow): Goal => ({
   planSummary: row.plan_summary,
   planError: row.plan_error,
   providerId: row.provider_id as ProviderId,
+  profileId: row.profile_id,
   model: row.model,
   effort: row.effort,
+  branch: row.branch,
+  baseBranch: row.base_branch,
+  worktreePath: row.worktree_path,
+  workDir: row.work_dir,
+  waitReason: row.wait_reason,
   roundStartedAt: row.round_started_at,
   createdAt: row.created_at,
 });
@@ -59,7 +77,7 @@ export class GoalRepository {
 
   insert(goal: Goal): void {
     this.db.run(
-      'INSERT INTO goals (id, project_id, title, text, status, plan_summary, plan_error, provider_id, model, effort, round_started_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO goals (id, project_id, title, text, status, plan_summary, plan_error, provider_id, profile_id, model, effort, round_started_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       goal.id,
       goal.projectId,
       goal.title,
@@ -68,6 +86,7 @@ export class GoalRepository {
       goal.planSummary,
       goal.planError,
       goal.providerId,
+      goal.profileId,
       goal.model,
       goal.effort,
       goal.roundStartedAt,
@@ -82,6 +101,22 @@ export class GoalRepository {
       planError,
       id,
     );
+  }
+
+  /** 目標の worktree の情報を保存する（消したときは worktreePath・workDir を null にする） */
+  setWorktree(id: string, worktree: GoalWorktree): void {
+    this.db.run(
+      'UPDATE goals SET branch = ?, base_branch = ?, worktree_path = ?, work_dir = ? WHERE id = ?',
+      worktree.branch,
+      worktree.baseBranch,
+      worktree.worktreePath,
+      worktree.workDir,
+      id,
+    );
+  }
+
+  setWaitReason(id: string, reason: string | null): void {
+    this.db.run('UPDATE goals SET wait_reason = ? WHERE id = ?', reason, id);
   }
 
   /** いまの作業の区切りを始めた時刻を保存する */

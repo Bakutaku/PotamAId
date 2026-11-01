@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ProgressOwner } from '../../shared/domain';
+import { resolveOwnerRun } from '../../shared/runConfig';
 import { PLAN_OUTPUT_SCHEMA, parsePlan } from '../planning/planSchema';
 import type { PlanOutput } from '../planning/planSchema';
 import {
@@ -38,13 +39,14 @@ export class PlanRunner {
 
     this.ctx.beginRun(key);
     try {
-      const provider = this.ctx.providers.get(goal.providerId);
+      const { provider, options: runOptions } = this.ctx.prepareRun(
+        resolveOwnerRun(goal, this.ctx.getSettings()),
+      );
       const options = {
         cwd: project.rootPath,
         access: 'readOnly' as const,
         instructions: PLAN_INSTRUCTIONS,
-        model: goal.model,
-        effort: goal.effort,
+        ...runOptions,
         mcpServers: await this.ctx.mcpServers({ type: 'goal', id: goal.id }),
       };
       const sessionId = store.goals.getPlanSessionId(goalId);
@@ -140,6 +142,9 @@ export class PlanRunner {
             title: t.title,
             description: t.description,
             kind: t.kind,
+            weight: t.weight,
+            profileId: null,
+            runInfo: null,
             status: 'todo',
             paused: false,
             latest: null,

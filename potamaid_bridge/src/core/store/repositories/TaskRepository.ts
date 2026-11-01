@@ -1,4 +1,10 @@
-import type { Task, TaskKind, TaskStatus } from '../../../shared/domain';
+import type {
+  Task,
+  TaskKind,
+  TaskRunInfo,
+  TaskStatus,
+  TaskWeight,
+} from '../../../shared/domain';
 import type { Database } from '../Database';
 
 interface TaskRow {
@@ -8,6 +14,9 @@ interface TaskRow {
   title: string;
   description: string;
   kind: string;
+  weight: string;
+  profile_id: string | null;
+  run_info: string | null;
   status: string;
   paused: number;
   session_id: string | null;
@@ -37,6 +46,9 @@ export type TaskUpdate = Partial<
     | 'title'
     | 'description'
     | 'kind'
+    | 'weight'
+    | 'profileId'
+    | 'runInfo'
     | 'status'
     | 'paused'
     | 'latest'
@@ -53,6 +65,9 @@ const COLUMNS: Record<keyof TaskUpdate, string> = {
   title: 'title',
   description: 'description',
   kind: 'kind',
+  weight: 'weight',
+  profileId: 'profile_id',
+  runInfo: 'run_info',
   status: 'status',
   paused: 'paused',
   latest: 'latest',
@@ -121,14 +136,17 @@ export class TaskRepository {
   insert(task: TaskRecord, dependsOn: string[]): void {
     this.db.transaction(() => {
       this.db.run(
-        `INSERT INTO tasks (id, goal_id, number, title, description, kind, status, paused, latest, result, needs_game_restart, error, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, goal_id, number, title, description, kind, weight, profile_id, run_info, status, paused, latest, result, needs_game_restart, error, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         task.id,
         task.goalId,
         task.number,
         task.title,
         task.description,
         task.kind,
+        task.weight,
+        task.profileId,
+        task.runInfo && JSON.stringify(task.runInfo),
         task.status,
         task.paused ? 1 : 0,
         task.latest,
@@ -152,7 +170,13 @@ export class TaskRepository {
     }
     const sets = entries.map(([key]) => `${COLUMNS[key]} = ?`).join(', ');
     const values = entries.map(([, value]) =>
-      typeof value === 'boolean' ? (value ? 1 : 0) : (value ?? null),
+      typeof value === 'boolean'
+        ? value
+          ? 1
+          : 0
+        : typeof value === 'object' && value !== null
+          ? JSON.stringify(value)
+          : (value ?? null),
     );
     this.db.run(`UPDATE tasks SET ${sets} WHERE id = ?`, ...values, id);
   }
@@ -240,6 +264,9 @@ export class TaskRepository {
       title: row.title,
       description: row.description,
       kind: row.kind as TaskKind,
+      weight: row.weight as TaskWeight,
+      profileId: row.profile_id,
+      runInfo: row.run_info ? (JSON.parse(row.run_info) as TaskRunInfo) : null,
       status: row.status as TaskStatus,
       paused: row.paused === 1,
       latest: row.latest,

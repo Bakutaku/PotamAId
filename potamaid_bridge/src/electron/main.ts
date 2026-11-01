@@ -41,6 +41,7 @@ function startBridge(): void {
 
   const core = new BridgeCore({
     databasePath: path.join(app.getPath('userData'), 'bridge.sqlite'),
+    worktreesDir: path.join(app.getPath('userData'), 'worktrees'),
     createProviders: (getSettings) => [
       new CodexProvider({
         getSettings,

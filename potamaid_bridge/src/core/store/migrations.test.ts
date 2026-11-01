@@ -52,4 +52,39 @@ describe('migrations', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('目標のモデルと思考量を目標の既定として引き継ぎ、タスクの重さを標準にする', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'potamaid-migration-'));
+    const databasePath = path.join(dir, 'bridge.sqlite');
+    try {
+      // 実行の設定を入れる前（user_version 4）のデータを作る
+      const old = new DatabaseSync(databasePath);
+      MIGRATIONS.slice(0, 4).forEach((sql) => old.exec(sql));
+      old.exec('PRAGMA user_version = 4');
+      old.exec(`
+        INSERT INTO projects (id, name, root_path, created_at) VALUES ('p', 'p', '${dir.replaceAll("'", "''")}', 0);
+        INSERT INTO goals (id, project_id, title, text, status, provider_id, model, effort, created_at) VALUES
+          ('g', 'p', '', '', 'active', 'codex', 'gpt-old', 'high', 0);
+        INSERT INTO tasks (id, goal_id, number, title, description, status) VALUES
+          ('t', 'g', 1, '', '', 'todo');
+      `);
+      old.close();
+
+      const store = new BridgeStore(databasePath);
+      expect(store.goals.get('g')).toMatchObject({
+        profileId: null,
+        model: 'gpt-old',
+        effort: 'high',
+      });
+      expect(store.tasks.get('t')).toMatchObject({
+        weight: 'standard',
+        profileId: null,
+        runInfo: null,
+      });
+      expect(store.projects.find('p')?.weightProfiles).toEqual({});
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

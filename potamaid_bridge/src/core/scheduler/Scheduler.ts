@@ -1,8 +1,9 @@
 /**
  * AI の実行枠の管理（仕様書3章・5章）。
  *
- * - 編集タスクは、対象modごとに1件ずつ実行する。
- *   実行するタスクは保存されている状態から {@link SchedulerHooks.nextEditTask} で選ぶ。
+ * - 編集タスクは、目標ごとの worktree で、対象modごとの上限まで並行して実行する（初期値は1）。
+ *   実行するタスクは保存されている状態から {@link SchedulerHooks.nextEditTask} で選ぶ
+ *   （同じ worktree の編集タスクは1件ずつにする）。
  * - 読み取り専用の実行（計画の作成・調査タスク・相談）は、対象modごとの上限まで並行して実行する。
  *   計画の作成と相談は順番待ち（FIFO）に入れ、空いた順に実行する。
  *   ユーザーが応答を待っているため、空いた枠には順番待ちを先に入れ、残りに調査タスクを入れる。
@@ -24,8 +25,12 @@ export interface ReadOnlyJob {
 export interface SchedulerHooks {
   projectIds(): string[];
   readOnlyLimit(projectId: string): number;
-  /** 次に実行する編集タスク。なければ null */
-  nextEditTask(projectId: string): Task | null;
+  editLimit(projectId: string): number;
+  /**
+   * 次に実行する編集タスク。なければ null
+   * @param running 実行中の編集タスクの ID
+   */
+  nextEditTask(projectId: string, running: ReadonlySet<string>): Task | null;
   runEditTask(task: Task): Promise<void>;
   /**
    * 次に実行する調査タスク。なければ null
@@ -45,7 +50,7 @@ export class Scheduler {
   private readonly queue: ReadOnlyJob[] = [];
   private readonly runningReadOnly = new Map<string, ReadOnlyJob>();
   /** 対象mod の ID → 実行中の編集タスクの ID */
-  private readonly runningEdit = new Map<string, string>();
+  private readonly runningEdit = new Map<string, Set<string>>();
   /** 実行中の調査タスクの ID */
   private readonly runningInvestigations = new Set<string>();
   private readonly settled = new Set<Promise<void>>();
@@ -94,7 +99,8 @@ export class Scheduler {
 
   counts(projectId: string): RunCounts {
     return {
-      edit: this.runningEdit.has(projectId) ? 1 : 0,
+      edit: this.runningEdit.get(projectId)?.size ?? 0,
+      editLimit: this.hooks.editLimit(projectId),
       readOnly: [...this.runningReadOnly.values()].filter(
         (job) => job.projectId === projectId,
       ).length,
@@ -106,7 +112,7 @@ export class Scheduler {
   /** 実行中か順番待ちのものがあるか（終了の警告に使う） */
   hasActiveWork(): boolean {
     return (
-      this.runningEdit.size > 0 ||
+      [...this.runningEdit.values()].some((set) => set.size > 0) ||
       this.runningReadOnly.size > 0 ||
       this.queue.length > 0
     );
@@ -133,17 +139,18 @@ export class Scheduler {
   }
 
   private pumpEdit(projectId: string): void {
-    if (this.runningEdit.has(projectId)) {
-      return;
+    const running = this.runningEdit.get(projectId) ?? new Set<string>();
+    this.runningEdit.set(projectId, running);
+    while (running.size < this.hooks.editLimit(projectId)) {
+      const task = this.hooks.nextEditTask(projectId, running);
+      if (!task) {
+        return;
+      }
+      running.add(task.id);
+      this.track(this.hooks.runEditTask(task), () => {
+        running.delete(task.id);
+      });
     }
-    const task = this.hooks.nextEditTask(projectId);
-    if (!task) {
-      return;
-    }
-    this.runningEdit.set(projectId, task.id);
-    this.track(this.hooks.runEditTask(task), () => {
-      this.runningEdit.delete(projectId);
-    });
   }
 
   private pumpReadOnly(projectId: string): void {

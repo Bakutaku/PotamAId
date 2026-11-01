@@ -58,11 +58,13 @@ export function registerIpc(
     sendGoalInstruction: (goalId, text) =>
       core.sendGoalInstruction(goalId, text),
     markGoalDone: (goalId) => core.markGoalDone(goalId),
+    integrateGoal: (goalId) => core.integrateGoal(goalId),
     sendTaskInstruction: (taskId, text) =>
       core.sendTaskInstruction(taskId, text),
     cancelTask: (taskId) => core.cancelTask(taskId),
     resumeTask: (taskId) => core.resumeTask(taskId),
     retryTask: (taskId) => core.retryTask(taskId),
+    updateTaskRun: (taskId, input) => core.updateTaskRun(taskId, input),
     createConsult: (projectId, text, options) =>
       core.createConsult(projectId, text, options),
     sendConsultMessage: (consultId, text) =>
