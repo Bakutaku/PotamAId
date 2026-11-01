@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.bakutaku.potamaid.PotamAId;
 import io.github.bakutaku.potamaid.PotamAIdClient;
+import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -30,6 +31,10 @@ public final class BridgeCommands {
                         .executes(c -> send(object("action", "consult_select", "id", StringArgumentType.getString(c, "id"))))))
                 .then(Commands.literal("send").then(Commands.argument("text", StringArgumentType.greedyString())
                         .executes(c -> send(object("action", "consult_send", "text", StringArgumentType.getString(c, "text"))))))
+                .then(Commands.literal("gui").executes(c -> {
+                    // チャット欄を閉じる処理で画面が消えないよう、次のティックで開く。
+                    Minecraft.getInstance().tell(ConsultScreen::open); return 1;
+                }))
                 .then(Commands.literal("cancel").executes(c -> send(object("action", "consult_cancel"))))
                 .then(Commands.literal("history").executes(c -> send(object("action", "history", "owner", "consult")))
                         .then(Commands.argument("before", IntegerArgumentType.integer(1))

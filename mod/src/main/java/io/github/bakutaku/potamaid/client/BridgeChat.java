@@ -6,16 +6,32 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /** 通信の結果をローカルチャットへ描画する。サーバーのチャットには送らない。 */
 @OnlyIn(Dist.CLIENT)
 public final class BridgeChat {
     private final BridgeConnection connection;
+    private final List<Consumer<JsonObject>> listeners = new CopyOnWriteArrayList<>();
+    private volatile boolean connected;
 
     public BridgeChat(BridgeConnection connection) {
         this.connection = connection;
         connection.setMessageListener(this::message);
     }
+
+    public boolean connected() { return connected; }
+
+    /** 相談画面などが同じ経路で操作を送る。結果は呼び出し側が描画する。 */
+    public CompletableFuture<JsonObject> call(JsonObject operation) { return connection.request(operation); }
+
+    /** 通知は Bridge 接続のスレッドで呼ばれる。描画する側でゲームスレッドへ移す。 */
+    public void addListener(Consumer<JsonObject> listener) { listeners.add(listener); }
+
+    public void removeListener(Consumer<JsonObject> listener) { listeners.remove(listener); }
 
     public void request(JsonObject operation) {
         connection.request(operation).whenComplete((response, error) -> {
@@ -26,7 +42,11 @@ public final class BridgeChat {
     }
 
     private void message(JsonObject message) {
-        switch (value(message, "type")) {
+        String type = value(message, "type");
+        if (type.equals("connected")) connected = true;
+        else if (type.equals("disconnected")) connected = false;
+        for (Consumer<JsonObject> listener : listeners) listener.accept(message);
+        switch (type) {
             case "connected" -> {
                 line(Component.translatable("commands.potamaid.bridge.connected"));
                 request(io.github.bakutaku.potamaid.connection.GameMcpServer.object("action", "status"));
@@ -75,7 +95,7 @@ public final class BridgeChat {
         if (value(item, "needsGameRestart").equals("true")) line(Component.translatable("commands.potamaid.bridge.restart"));
     }
 
-    private static String value(JsonObject object, String name) {
+    static String value(JsonObject object, String name) {
         JsonElement value = object.get(name);
         return value == null || value.isJsonNull() ? "" : value.getAsString();
     }

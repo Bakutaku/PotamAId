@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "G": {
+      "item": "minecraft:glass_pane"
+    },
+    "P": {
+      "tag": "minecraft:planks"
+    },
+    "R": {
+      "item": "minecraft:redstone"
+    }
+  },
+  "pattern": [
+    "GGG",
+    "PRP",
+    "P P"
+  ],
+  "result": {
+    "count": 1,
+    "id": "potamaid:consult_desk"
+  }
+}

@@ -16,6 +16,7 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import io.github.bakutaku.potamaid.client.BridgeConnection;
 import io.github.bakutaku.potamaid.client.BridgeChat;
+import io.github.bakutaku.potamaid.client.ConsultKeys;
 import io.github.bakutaku.potamaid.connection.GameConnection;
 
 // This class will not load on dedicated servers. Accessing client side code from here is safe.
@@ -36,6 +37,7 @@ public class PotamAIdClient {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         container.registerConfig(ModConfig.Type.CLIENT, Config.CLIENT_SPEC);
         bus.addListener(PotamAIdClient::onClientSetup);
+        bus.addListener(ConsultKeys::register);
     }
 
     static void onClientSetup(FMLClientSetupEvent event) {

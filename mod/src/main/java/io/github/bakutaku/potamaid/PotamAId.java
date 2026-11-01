@@ -2,6 +2,9 @@ package io.github.bakutaku.potamaid;
 
 import org.slf4j.Logger;
 
+import io.github.bakutaku.potamaid.block.ConsultDeskBlock;
+import io.github.bakutaku.potamaid.data.DataGenerators;
+
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -15,6 +18,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -50,6 +54,11 @@ public class PotamAId {
     // Creates a new BlockItem with the id "potamaid:example_block", combining the namespace and path
     public static final DeferredItem<BlockItem> EXAMPLE_BLOCK_ITEM = ITEMS.registerSimpleBlockItem("example_block", EXAMPLE_BLOCK);
 
+    // 画面付きの机。右クリックで相談画面を開く処理はクライアント側（client.ConsultDeskInteraction）にある。
+    public static final DeferredBlock<ConsultDeskBlock> CONSULT_DESK = BLOCKS.registerBlock("consult_desk", ConsultDeskBlock::new,
+            BlockBehaviour.Properties.of().mapColor(MapColor.WOOD).strength(2.0f).sound(SoundType.WOOD).noOcclusion());
+    public static final DeferredItem<BlockItem> CONSULT_DESK_ITEM = ITEMS.registerSimpleBlockItem("consult_desk", CONSULT_DESK);
+
     // Creates a new food item with the id "potamaid:example_id", nutrition 1 and saturation 2
     public static final DeferredItem<Item> EXAMPLE_ITEM = ITEMS.registerSimpleItem("example_item", new Item.Properties().food(new FoodProperties.Builder()
             .alwaysEdible().nutrition(1).saturationModifier(2f).build()));
@@ -61,6 +70,7 @@ public class PotamAId {
             .icon(() -> EXAMPLE_ITEM.get().getDefaultInstance())
             .displayItems((parameters, output) -> {
                 output.accept(EXAMPLE_ITEM.get());// Add the example item to the tab. For your own tabs, this method is preferred over the event
+                output.accept(CONSULT_DESK_ITEM.get());
             }).build());
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.
@@ -68,6 +78,7 @@ public class PotamAId {
     public PotamAId(IEventBus modEventBus, ModContainer modContainer) {
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
+        modEventBus.addListener(DataGenerators::gather);
 
         // Register the Deferred Register to the mod event bus so blocks get registered
         BLOCKS.register(modEventBus);

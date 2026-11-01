@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "potamaid:block/consult_desk",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "potamaid:block/consult_desk"
+    },
+    "facing=south": {
+      "model": "potamaid:block/consult_desk",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "potamaid:block/consult_desk",
+      "y": 270
+    }
+  }
+}
