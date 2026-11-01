@@ -15,6 +15,8 @@ final class ModBlockLoot extends BlockLootSubProvider {
     @Override
     protected void generate() {
         dropSelf(PotamAId.CONSULT_DESK.get());
+        dropSelf(PotamAId.PROGRESS_BOARD.get());
+        dropSelf(PotamAId.NOTICE_LAMP.get());
     }
 
     @Override

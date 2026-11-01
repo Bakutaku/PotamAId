@@ -27,5 +27,24 @@ final class ModRecipes extends RecipeProvider {
                 .define('R', Items.REDSTONE)
                 .unlockedBy("has_redstone", has(Items.REDSTONE))
                 .save(output);
+        ShapedRecipeBuilder.shaped(RecipeCategory.DECORATIONS, PotamAId.PROGRESS_BOARD_ITEM.get())
+                .pattern("GGG")
+                .pattern("LRL")
+                .pattern("SSS")
+                .define('G', Items.GLASS_PANE)
+                .define('L', Items.LAPIS_LAZULI)
+                .define('R', Items.REDSTONE)
+                .define('S', Items.STONE_SLAB)
+                .unlockedBy("has_redstone", has(Items.REDSTONE))
+                .save(output);
+        ShapedRecipeBuilder.shaped(RecipeCategory.DECORATIONS, PotamAId.NOTICE_LAMP_ITEM.get())
+                .pattern("G")
+                .pattern("R")
+                .pattern("S")
+                .define('G', Items.GLASS_PANE)
+                .define('R', Items.REDSTONE)
+                .define('S', Items.STONE_SLAB)
+                .unlockedBy("has_redstone", has(Items.REDSTONE))
+                .save(output);
     }
 }

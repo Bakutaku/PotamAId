@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "potamaid:block/progress_board",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "potamaid:block/progress_board"
+    },
+    "facing=south": {
+      "model": "potamaid:block/progress_board",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "potamaid:block/progress_board",
+      "y": 270
+    }
+  }
+}

@@ -3,6 +3,9 @@ package io.github.bakutaku.potamaid;
 import org.slf4j.Logger;
 
 import io.github.bakutaku.potamaid.block.ConsultDeskBlock;
+import io.github.bakutaku.potamaid.block.HologramBlockEntity;
+import io.github.bakutaku.potamaid.block.NoticeLampBlock;
+import io.github.bakutaku.potamaid.block.ProgressBoardBlock;
 import io.github.bakutaku.potamaid.data.DataGenerators;
 
 import com.mojang.logging.LogUtils;
@@ -17,6 +20,7 @@ import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.material.MapColor;
@@ -46,6 +50,7 @@ public class PotamAId {
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MODID);
     // Create a Deferred Register to hold Items which will all be registered under the "potamaid" namespace
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MODID);
+    public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITY_TYPES = DeferredRegister.create(Registries.BLOCK_ENTITY_TYPE, MODID);
     // Create a Deferred Register to hold CreativeModeTabs which will all be registered under the "potamaid" namespace
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
 
@@ -59,6 +64,18 @@ public class PotamAId {
             BlockBehaviour.Properties.of().mapColor(MapColor.WOOD).strength(2.0f).sound(SoundType.WOOD).noOcclusion());
     public static final DeferredItem<BlockItem> CONSULT_DESK_ITEM = ITEMS.registerSimpleBlockItem("consult_desk", CONSULT_DESK);
 
+    // ホログラムを映す看板。描画はクライアント専用のクラス（client.hologram）にあり、BlockEntity は描画のためだけに置く。
+    public static final DeferredBlock<ProgressBoardBlock> PROGRESS_BOARD = BLOCKS.registerBlock("progress_board", ProgressBoardBlock::new,
+            BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_CYAN).strength(2.0f).sound(SoundType.METAL).lightLevel(state -> 6).noOcclusion());
+    public static final DeferredItem<BlockItem> PROGRESS_BOARD_ITEM = ITEMS.registerSimpleBlockItem("progress_board", PROGRESS_BOARD);
+    public static final DeferredBlock<NoticeLampBlock> NOTICE_LAMP = BLOCKS.registerBlock("notice_lamp", NoticeLampBlock::new,
+            BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_ORANGE).strength(2.0f).sound(SoundType.METAL).noOcclusion());
+    public static final DeferredItem<BlockItem> NOTICE_LAMP_ITEM = ITEMS.registerSimpleBlockItem("notice_lamp", NOTICE_LAMP);
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HologramBlockEntity>> PROGRESS_BOARD_ENTITY = BLOCK_ENTITY_TYPES.register("progress_board",
+            () -> BlockEntityType.Builder.of((pos, state) -> new HologramBlockEntity(PotamAId.PROGRESS_BOARD_ENTITY.get(), pos, state), PROGRESS_BOARD.get()).build(null));
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HologramBlockEntity>> NOTICE_LAMP_ENTITY = BLOCK_ENTITY_TYPES.register("notice_lamp",
+            () -> BlockEntityType.Builder.of((pos, state) -> new HologramBlockEntity(PotamAId.NOTICE_LAMP_ENTITY.get(), pos, state), NOTICE_LAMP.get()).build(null));
+
     // Creates a new food item with the id "potamaid:example_id", nutrition 1 and saturation 2
     public static final DeferredItem<Item> EXAMPLE_ITEM = ITEMS.registerSimpleItem("example_item", new Item.Properties().food(new FoodProperties.Builder()
             .alwaysEdible().nutrition(1).saturationModifier(2f).build()));
@@ -71,6 +88,8 @@ public class PotamAId {
             .displayItems((parameters, output) -> {
                 output.accept(EXAMPLE_ITEM.get());// Add the example item to the tab. For your own tabs, this method is preferred over the event
                 output.accept(CONSULT_DESK_ITEM.get());
+                output.accept(PROGRESS_BOARD_ITEM.get());
+                output.accept(NOTICE_LAMP_ITEM.get());
             }).build());
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.
@@ -84,6 +103,7 @@ public class PotamAId {
         BLOCKS.register(modEventBus);
         // Register the Deferred Register to the mod event bus so items get registered
         ITEMS.register(modEventBus);
+        BLOCK_ENTITY_TYPES.register(modEventBus);
         // Register the Deferred Register to the mod event bus so tabs get registered
         CREATIVE_MODE_TABS.register(modEventBus);
 

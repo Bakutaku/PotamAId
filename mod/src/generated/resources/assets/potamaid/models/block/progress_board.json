@@ -1,0 +1,53 @@
+{
+  "elements": [
+    {
+      "faces": {
+        "down": {
+          "texture": "#edge"
+        },
+        "east": {
+          "texture": "#edge",
+          "uv": [
+            14.0,
+            0.0,
+            16.0,
+            16.0
+          ]
+        },
+        "north": {
+          "texture": "#plate"
+        },
+        "south": {
+          "texture": "#edge"
+        },
+        "up": {
+          "texture": "#edge"
+        },
+        "west": {
+          "texture": "#edge",
+          "uv": [
+            0.0,
+            0.0,
+            2.0,
+            16.0
+          ]
+        }
+      },
+      "from": [
+        0,
+        0,
+        14
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ]
+    }
+  ],
+  "textures": {
+    "edge": "minecraft:block/cyan_terracotta",
+    "particle": "potamaid:block/hologram_plate",
+    "plate": "potamaid:block/hologram_plate"
+  }
+}

@@ -59,6 +59,7 @@ public final class ConsultScreen extends Screen {
     }
 
     public static void open() {
+        BridgeStatusCache.get().markRead();
         Minecraft.getInstance().setScreen(new ConsultScreen());
     }
 
@@ -105,6 +106,7 @@ public final class ConsultScreen extends Screen {
     @Override
     public void removed() {
         closed = true;
+        BridgeStatusCache.get().markRead();
         if (chat != null) chat.removeListener(listener);
     }
 

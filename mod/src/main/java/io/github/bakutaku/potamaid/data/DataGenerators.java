@@ -32,6 +32,6 @@ public final class DataGenerators {
 
     /** データ生成で扱うブロックの一覧。例のブロックは今回の対象外。 */
     static Iterable<Block> blocks() {
-        return List.of(PotamAId.CONSULT_DESK.get());
+        return List.of(PotamAId.CONSULT_DESK.get(), PotamAId.PROGRESS_BOARD.get(), PotamAId.NOTICE_LAMP.get());
     }
 }

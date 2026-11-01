@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "potamaid:block/notice_lamp",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "potamaid:block/notice_lamp"
+    },
+    "facing=south": {
+      "model": "potamaid:block/notice_lamp",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "potamaid:block/notice_lamp",
+      "y": 270
+    }
+  }
+}
