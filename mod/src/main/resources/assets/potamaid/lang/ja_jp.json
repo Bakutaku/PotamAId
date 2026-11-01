@@ -1,3 +1,12 @@
 {
+  "potamaid.configuration.section.potamaid.client.toml": "PotamAId クライアント",
+  "potamaid.configuration.section.potamaid.client.toml.title": "PotamAId クライアント",
+  "potamaid.configuration.mcp": "ゲーム MCP",
+  "potamaid.configuration.mcp.enabled": "ゲーム MCP を有効にする",
+  "potamaid.configuration.mcp.port": "ゲーム MCP のポート",
+  "potamaid.configuration.mcp.requestTimeoutSeconds": "ゲーム情報の取得待ち時間（秒）",
+  "potamaid.configuration.bridge": "PotamAId Bridge",
+  "potamaid.configuration.bridge.enabled": "Bridge に接続する",
+  "potamaid.configuration.bridge.projectRoot": "対象modの指定（空欄で自動設定）",
   "commands.potamaid.info.result": "ゲーム情報: %s"
 }

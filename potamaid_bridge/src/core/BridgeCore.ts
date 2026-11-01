@@ -36,6 +36,7 @@ import type {
 import { findProfile, normalizeWeight } from '../shared/runConfig';
 import { ApprovalBroker } from './ApprovalBroker';
 import { BridgeMcpServer } from './mcp/BridgeMcpServer';
+import { ModConnectionServer } from './game/ModConnectionServer';
 import { TypedEmitter } from './events';
 import { GoalWorkspaces } from './git/GoalWorkspaces';
 import { checkTaskGraph } from './planning/taskGraph';
@@ -59,6 +60,8 @@ import { BridgeStore } from './store/BridgeStore';
 export type CoreApi = Omit<BridgeApi, 'pickProjectDirectory'>;
 
 export interface BridgeCoreOptions {
+  /** テストでは利用者の接続情報を上書きしないよう一時フォルダーを指定する。 */
+  modConnectionDirectory?: string;
   /** データベースのファイルのパス */
   databasePath: string;
   /** 目標の worktree を置くディレクトリ（Bridge のユーザーデータの worktrees。2026-10-25 決定） */
@@ -87,6 +90,7 @@ export class BridgeCore implements CoreApi {
   private readonly providers: ProviderRegistry;
   private readonly broker = new ApprovalBroker();
   private readonly mcp: BridgeMcpServer;
+  private readonly game: ModConnectionServer;
   private readonly ctx: RunnerContext;
   private readonly scheduler: Scheduler;
   private readonly planRunner: PlanRunner;
@@ -108,6 +112,11 @@ export class BridgeCore implements CoreApi {
     this.mcp = new BridgeMcpServer(this.store, (error) =>
       this.reportError(error),
     );
+    this.game = new ModConnectionServer(
+      () => this.store.projects.list(),
+      () => this.events.emit('changed', undefined),
+      options.modConnectionDirectory,
+    );
     this.ctx = new RunnerContext(
       this.store,
       this.providers,
@@ -115,6 +124,7 @@ export class BridgeCore implements CoreApi {
       this.events,
       this.mcp,
       () => this.settings,
+      this.game,
     );
     this.planRunner = new PlanRunner(this.ctx);
     this.workspaces = new GoalWorkspaces(options.worktreesDir);
@@ -156,6 +166,7 @@ export class BridgeCore implements CoreApi {
 
   /** プロバイダーの状態を確かめ、実行できるものを始める */
   start(): void {
+    this.game.start().catch((error: unknown) => this.reportError(error));
     // セッションを始めるときにも待つので、ここでは待ち受けの開始だけを先に頼む
     this.mcp.start().catch((error: unknown) => this.reportError(error));
     void this.refreshProviders();
@@ -173,6 +184,7 @@ export class BridgeCore implements CoreApi {
     const projects = this.store.projects.list();
     return {
       projects,
+      games: this.game.snapshot(),
       goals: this.store.goals.list(),
       tasks: this.store.tasks.list(),
       consults: this.store.consults.list(),
@@ -683,6 +695,7 @@ export class BridgeCore implements CoreApi {
     await this.scheduler.stop(SHUTDOWN_TIMEOUT_MS);
     await this.integrator.idle();
     await this.mcp.close();
+    await this.game.close();
     this.store.close();
   }
 

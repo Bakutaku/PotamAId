@@ -9,6 +9,12 @@
 /** AI プロバイダーの ID。Claude は後で対応する */
 export type ProviderId = 'codex' | 'claude';
 
+/** 認証情報は IPC・画面へ渡さない。 */
+export interface GameConnectionStatus {
+  state: 'disconnected' | 'connected' | 'available' | 'error';
+  message: string;
+}
+
 /** 対象mod（AI が編集する mod のリポジトリ） */
 export interface Project {
   id: string;

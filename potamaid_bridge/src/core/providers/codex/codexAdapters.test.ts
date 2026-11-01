@@ -153,9 +153,19 @@ describe('セッションの MCP サーバー', () => {
       'mcp_servers.potamaid_bridge': {
         url: 'http://127.0.0.1:1234/mcp/goal/g',
         http_headers: { Authorization: 'Bearer x' },
+        enabled: true,
+      },
+      'mcp_servers.potamaid_game': {
+        url: 'http://127.0.0.1:38281/mcp',
+        enabled: false,
       },
     });
-    expect(mcpServersConfig([])).toBeNull();
+    expect(mcpServersConfig([])).toEqual({
+      'mcp_servers.potamaid_game': {
+        url: 'http://127.0.0.1:38281/mcp',
+        enabled: false,
+      },
+    });
   });
 });
 

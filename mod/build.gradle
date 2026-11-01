@@ -199,6 +199,31 @@ tasks.named('test', Test) {
     failOnNoDiscoveredTests = false
 }
 
+// HTTP と OS アクセス権のテスト。ゲーム・GUI は起動せず、新しい依存も使わない。
+tasks.register('testGameMcp', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.bakutaku.potamaid.connection.GameMcpProtocolTests'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn 'testGameMcp' }
+
+tasks.register('serveTestGameMcp', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.bakutaku.potamaid.connection.GameMcpProtocolTests'
+    args providers.gradleProperty('mcpTestDirectory').orElse('build/mcp-interop').get()
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+tasks.register('serveTestBridgeClient', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.bakutaku.potamaid.connection.BridgeProtocolClient'
+    args providers.gradleProperty('bridgeTestDirectory').orElse('build/ws-interop').get()
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.
 idea {
     module {

@@ -146,7 +146,10 @@ function MainScreen({ snapshot }: { snapshot: BridgeSnapshot }) {
           />
         )}
       </div>
-      <StatusFooter providers={snapshot.providers} />
+      <StatusFooter
+        providers={snapshot.providers}
+        game={project ? snapshot.games?.[project.id] : undefined}
+      />
 
       <NewGoalDialog
         project={project}

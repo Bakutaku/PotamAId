@@ -34,7 +34,21 @@ public class Config {
             .comment("A list of items to log on common setup.")
             .defineListAllowEmpty("items", List.of("minecraft:iron_ingot"), () -> "", Config::validateItemName);
 
+    public static final ModConfigSpec.BooleanValue MCP_ENABLED = BUILDER.translation("potamaid.configuration.mcp.enabled")
+            .comment("Enable the read-only game MCP in singleplayer. Restart the game after changing connection settings.").define("mcp.enabled", true);
+    public static final ModConfigSpec.IntValue MCP_PORT = BUILDER.translation("potamaid.configuration.mcp.port")
+            .comment("Fixed localhost MCP port. Use a different port for each concurrent game.").defineInRange("mcp.port", 38281, 1024, 65535);
+    public static final ModConfigSpec.IntValue MCP_REQUEST_TIMEOUT = BUILDER.translation("potamaid.configuration.mcp.requestTimeoutSeconds")
+            .comment("Timeout in seconds for a server-thread snapshot request.").defineInRange("mcp.requestTimeoutSeconds", 5, 1, 60);
     static final ModConfigSpec SPEC = BUILDER.build();
+
+    private static final ModConfigSpec.Builder CLIENT_BUILDER = new ModConfigSpec.Builder();
+    public static final ModConfigSpec.BooleanValue BRIDGE_ENABLED = CLIENT_BUILDER.translation("potamaid.configuration.bridge.enabled")
+            .comment("Automatically connect to PotamAId Bridge on this PC.").define("bridge.enabled", true);
+    public static final ModConfigSpec.ConfigValue<String> BRIDGE_PROJECT_ROOT = CLIENT_BUILDER.translation("potamaid.configuration.bridge.projectRoot")
+            .comment("Leave empty to automatically match the game directory to a single project registered in Bridge.",
+                    "Optional absolute project path override. Restart the game after changing this.").define("bridge.projectRoot", "");
+    static final ModConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
 
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));

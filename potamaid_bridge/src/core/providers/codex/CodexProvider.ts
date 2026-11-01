@@ -13,6 +13,7 @@ import type {
   ProviderStatus,
   Settings,
 } from '../../../shared/domain';
+import { createHash } from 'node:crypto';
 import type {
   AiApprovalRequest,
   AiProvider,
@@ -100,6 +101,12 @@ export class CodexProvider implements AiProvider {
   private blockedReason: string | null = null;
   private readonly retiredTurnIds = new Set<string>();
   private clientEpoch = 0;
+  private readonly sessionConfigs = new Map<string, string>();
+  private readonly secrets = new Set<string>();
+  private readonly redirected = new Map<
+    string,
+    { provider: CodexProvider; fingerprint: string }
+  >();
 
   constructor(private readonly options: CodexProviderOptions) {}
 
@@ -135,13 +142,18 @@ export class CodexProvider implements AiProvider {
   }
 
   async startSession(options: SessionOptions): Promise<AiSession> {
+    this.rememberSecrets(options);
     const client = await this.getClient();
-    const response = await client.request(
-      'thread/start',
-      this.threadParams(options),
-    );
+    const response = await client
+      .request('thread/start', this.threadParams(options))
+      .catch((error) => {
+        throw new Error(
+          this.redact(error instanceof Error ? error.message : String(error)),
+        );
+      });
     this.assertAvailable();
     this.loadedThreads.add(response.thread.id);
+    this.sessionConfigs.set(response.thread.id, sessionFingerprint(options));
     return this.createSession(response.thread.id, options, {
       model: response.model || null,
       effort: options.effort || response.reasoningEffort,
@@ -152,11 +164,72 @@ export class CodexProvider implements AiProvider {
     sessionId: string,
     options: SessionOptions,
   ): Promise<AiSession> {
+    this.rememberSecrets(options);
+    this.assertAvailable();
+    const fingerprint = sessionFingerprint(options);
+    const redirected = this.redirected.get(sessionId);
+    if (redirected) {
+      redirected.provider.assertAvailable();
+      if (redirected.fingerprint === fingerprint) {
+        return this.isolatedSession(
+          await redirected.provider.resumeSession(sessionId, options),
+          redirected.provider,
+        );
+      }
+      if (redirected.provider.turns.size > 0)
+        throw new Error('このセッションは応答中です');
+      await redirected.provider.dispose();
+      this.redirected.delete(sessionId);
+    }
+    // 0.163.0 では loaded thread の resume.config は MCP 接続を更新しない。
+    // 元のプロセスのほかのスレッドはそのままにして、この ID だけ別プロセスで再開する。
+    if (
+      redirected ||
+      (this.loadedThreads.has(sessionId) &&
+        this.sessionConfigs.get(sessionId) !== fingerprint)
+    ) {
+      if (this.turns.has(sessionId))
+        throw new Error('このセッションは応答中です');
+      const provider = new CodexProvider(this.options);
+      const session = await provider
+        .resumeSession(sessionId, options)
+        .catch(async (error) => {
+          await provider.dispose();
+          throw error;
+        });
+      this.redirected.set(sessionId, { provider, fingerprint });
+      return this.isolatedSession(session, provider);
+    }
     await this.ensureLoaded(sessionId, options);
     return this.createSession(sessionId, options);
   }
 
+  /** 変更された相談が増えても、使っていない専用プロセスを残し続けない。 */
+  private isolatedSession(
+    session: AiSession,
+    provider: CodexProvider,
+  ): AiSession {
+    return {
+      ...session,
+      runTurn: (input, handlers) => {
+        const handle = session.runTurn(input, handlers);
+        return {
+          ...handle,
+          result: handle.result.then(async (result) => {
+            await provider.dispose();
+            return result;
+          }),
+        };
+      },
+    };
+  }
+
   async dispose(): Promise<void> {
+    await Promise.all(
+      [...this.redirected.values()].map((entry) => entry.provider.dispose()),
+    );
+    this.redirected.clear();
+    this.sessionConfigs.clear();
     const client = this.client ?? (await this.starting?.catch(() => null));
     this.client = null;
     this.starting = null;
@@ -294,7 +367,9 @@ export class CodexProvider implements AiProvider {
         const failure: TurnResult = {
           status: 'failed',
           finalMessage: null,
-          error: error instanceof Error ? error.message : String(error),
+          error: this.redact(
+            error instanceof Error ? error.message : String(error),
+          ),
         };
         if (
           turn.startSent &&
@@ -412,12 +487,19 @@ export class CodexProvider implements AiProvider {
       return;
     }
     const client = await this.getClient();
-    await client.request('thread/resume', {
-      threadId,
-      ...this.threadParams(options),
-      excludeTurns: true,
-    });
+    await client
+      .request('thread/resume', {
+        threadId,
+        ...this.threadParams(options),
+        excludeTurns: true,
+      })
+      .catch((error) => {
+        throw new Error(
+          this.redact(error instanceof Error ? error.message : String(error)),
+        );
+      });
     this.loadedThreads.add(threadId);
+    this.sessionConfigs.set(threadId, sessionFingerprint(options));
   }
 
   /** thread/start と thread/resume で共通の設定 */
@@ -426,7 +508,12 @@ export class CodexProvider implements AiProvider {
       cwd: options.cwd,
       model: this.model(options),
       ...CODEX_PERMISSIONS[options.access],
-      developerInstructions: options.instructions ?? null,
+      developerInstructions: [
+        options.instructions,
+        'potamaid_game は読み取り専用のゲーム情報です。取得失敗時はその理由を伝え、古い値を現在情報として扱わないでください。接続ゲームは起動元フォルダーのコードで動いています。worktree の未反映の変更を検証するものではありません。',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       config: mcpServersConfig(options.mcpServers ?? []),
     };
   }
@@ -463,7 +550,8 @@ export class CodexProvider implements AiProvider {
         onExit: (error) => {
           if (epoch === this.clientEpoch) this.onExit(error);
         },
-        onLog: this.options.onLog,
+        onLog: (message) => this.options.onLog?.(this.redact(message)),
+        redact: (message) => this.redact(message),
       })
         .then((client) => {
           this.client = client;
@@ -491,6 +579,23 @@ export class CodexProvider implements AiProvider {
         error: error.message,
       });
     }
+  }
+
+  private rememberSecrets(options: SessionOptions): void {
+    for (const server of options.mcpServers ?? []) {
+      for (const [name, value] of Object.entries(server.headers)) {
+        if (name.toLowerCase() === 'authorization') {
+          this.secrets.add(value);
+          if (value.startsWith('Bearer ')) this.secrets.add(value.slice(7));
+        }
+      }
+    }
+  }
+
+  private redact(message: string): string {
+    for (const secret of this.secrets)
+      if (secret) message = message.replaceAll(secret, '[redacted]');
+    return message;
   }
 
   private onNotification(notification: ServerNotification): void {
@@ -759,13 +864,22 @@ function describeAccount(account: Account): string {
 export function mcpServersConfig(
   servers: McpServerConfig[],
 ): Record<string, JsonValue> | null {
-  if (servers.length === 0) {
-    return null;
-  }
-  return Object.fromEntries(
-    servers.map((server) => [
+  return Object.fromEntries([
+    ...(!servers.some((server) => server.name === 'potamaid_game')
+      ? [
+          [
+            'mcp_servers.potamaid_game',
+            { url: 'http://127.0.0.1:38281/mcp', enabled: false },
+          ],
+        ]
+      : []),
+    ...servers.map((server) => [
       `mcp_servers.${server.name}`,
-      { url: server.url, http_headers: server.headers },
+      { url: server.url, http_headers: server.headers, enabled: true },
     ]),
-  );
+  ]);
+}
+
+function sessionFingerprint(options: SessionOptions): string {
+  return createHash('sha256').update(JSON.stringify(options)).digest('hex');
 }

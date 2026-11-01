@@ -40,6 +40,7 @@ export interface RunCounts {
  * 途中経過は量が多いため含めず、{@link BridgeApi.getProgressEvents} とプッシュで別に受け取る。
  */
 export interface BridgeSnapshot {
+  games?: Record<string, import('./domain').GameConnectionStatus>;
   projects: Project[];
   goals: Goal[];
   tasks: Task[];

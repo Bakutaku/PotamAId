@@ -52,6 +52,8 @@ export interface AppServerClientOptions {
   /** プロセスが終わった */
   onExit(error: Error): void;
   onLog?(message: string): void;
+  /** セッションへ渡した秘密を、保存・出力の前に除く。 */
+  redact?(message: string): string;
 }
 
 /** エラーの説明に添える標準エラー出力の行数 */
@@ -104,11 +106,12 @@ export class AppServerClient {
       connection.handleLine(line),
     );
     createInterface({ input: child.stderr }).on('line', (line) => {
-      client.stderrTail.push(line);
+      const safeLine = options.redact?.(line) ?? line;
+      client.stderrTail.push(safeLine);
       if (client.stderrTail.length > STDERR_TAIL_LINES) {
         client.stderrTail.shift();
       }
-      options.onLog?.(`[codex] ${line}`);
+      options.onLog?.(`[codex] ${safeLine}`);
     });
 
     const exited = new Promise<Error>((resolve) => {

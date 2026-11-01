@@ -33,6 +33,7 @@ import type {
 } from '../providers/AiProvider';
 import type { ProviderRegistry } from '../providers/ProviderRegistry';
 import type { BridgeStore } from '../store/BridgeStore';
+import type { ModConnectionServer } from '../game/ModConnectionServer';
 
 /** Bridge の本体が発行するイベント */
 export interface CoreEvents extends Record<string, unknown> {
@@ -91,6 +92,7 @@ export class RunnerContext {
     private readonly mcp: BridgeMcpServer,
     /** いまの Bridge の設定 */
     readonly getSettings: () => Settings,
+    private readonly game?: ModConnectionServer,
   ) {}
 
   /** 決めた実行の設定の、プロバイダーとセッションの設定（モデルと思考量） */
@@ -107,7 +109,12 @@ export class RunnerContext {
   /** セッションに渡す MCP サーバー（Bridge のツール）。使えなければ空 */
   async mcpServers(scope: SessionScope): Promise<McpServerConfig[]> {
     const config = await this.mcp.configFor(scope);
-    return config ? [config] : [];
+    const projectId =
+      scope.type === 'project'
+        ? scope.id
+        : this.store.goals.get(scope.id).projectId;
+    const game = this.game?.configFor(projectId);
+    return [...(config ? [config] : []), ...(game ? [game] : [])];
   }
 
   /** 状態が変わったことを知らせる */

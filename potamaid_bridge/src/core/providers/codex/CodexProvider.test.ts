@@ -60,7 +60,7 @@ describe('CodexProvider のターンの分離と停止', () => {
       return {
         isAlive: true,
         request,
-        dispose: async () => callbacks.onExit(new Error('test shutdown')),
+        dispose: async () => opts.onExit(new Error('test shutdown')),
       } as unknown as AppServerClient;
     });
     onLog.mockClear();
@@ -87,6 +87,109 @@ describe('CodexProvider のターンの分離と停止', () => {
       params: { threadId: 'thread', turn: turnData(id, status) },
     });
   }
+
+  it('読み込み済みの相談のゲーム接続変更は、そのスレッドだけ別プロセスで反映する', async () => {
+    await provider.startSession(options);
+    const oldCallbacks = callbacks;
+    const updated = {
+      ...options,
+      mcpServers: [
+        {
+          name: 'potamaid_game',
+          url: 'http://127.0.0.1:38281/mcp',
+          headers: { Authorization: 'Bearer ' + 'a'.repeat(64) },
+        },
+      ],
+    };
+    const resumed = await provider.resumeSession('thread', updated);
+    expect(AppServerClient.start).toHaveBeenCalledTimes(2);
+    expect(callbacks).not.toBe(oldCallbacks);
+    expect(request).toHaveBeenCalledWith(
+      'thread/resume',
+      expect.objectContaining({
+        threadId: 'thread',
+        config: expect.objectContaining({
+          'mcp_servers.potamaid_game': expect.objectContaining({
+            url: updated.mcpServers[0].url,
+          }),
+        }),
+      }),
+    );
+    await provider.resumeSession('thread', updated);
+    expect(AppServerClient.start).toHaveBeenCalledTimes(2);
+    const turn = resumed.runTurn({ text: '現在地' }, handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    complete('turn-1');
+    expect((await turn.result).status).toBe('completed');
+    await provider.resumeSession('thread', options);
+    expect(request).toHaveBeenLastCalledWith(
+      'thread/resume',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          'mcp_servers.potamaid_game': expect.objectContaining({
+            enabled: false,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('応答中はゲーム接続変更による再開を拒否し、AI を中断しない', async () => {
+    const session = await provider.startSession(options);
+    const turn = session.runTurn({ text: 'first' }, handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(
+      provider.resumeSession('thread', {
+        ...options,
+        mcpServers: [
+          {
+            name: 'potamaid_game',
+            url: 'http://127.0.0.1:38281/mcp',
+            headers: {},
+          },
+        ],
+      }),
+    ).rejects.toThrow('応答中');
+    expect(
+      request.mock.calls.filter(([method]) => method === 'turn/interrupt'),
+    ).toHaveLength(0);
+    complete('turn-1');
+    await turn.result;
+  });
+
+  it('ゲーム接続を変えた相談の再開で、共有プロセスの別の応答を止めない', async () => {
+    let starts = 0;
+    request.mockImplementation(async (method) => {
+      if (method === 'thread/start')
+        return { thread: { id: ++starts === 1 ? 'thread' : 'other' } };
+      if (method === 'turn/start')
+        return { turn: turnData('other-turn', 'inProgress') };
+      return {};
+    });
+    await provider.startSession(options);
+    const other = await provider.startSession(options);
+    const oldCallbacks = callbacks;
+    const active = other.runTurn({ text: '別の応答' }, handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    await provider.resumeSession('thread', {
+      ...options,
+      mcpServers: [
+        {
+          name: 'potamaid_game',
+          url: 'http://127.0.0.1:38281/mcp',
+          headers: {},
+        },
+      ],
+    });
+    expect(
+      request.mock.calls.some(([method]) => method === 'turn/interrupt'),
+    ).toBe(false);
+    oldCallbacks.onNotification({
+      method: 'turn/completed',
+      params: { threadId: 'other', turn: turnData('other-turn') },
+    });
+    expect((await active.result).status).toBe('completed');
+  });
 
   function approval(turnId: string): ServerRequest {
     return {

@@ -1,4 +1,13 @@
 {
+  "potamaid.configuration.section.potamaid.client.toml": "PotamAId Client",
+  "potamaid.configuration.section.potamaid.client.toml.title": "PotamAId Client",
+  "potamaid.configuration.mcp": "Game MCP",
+  "potamaid.configuration.mcp.enabled": "Enable Game MCP",
+  "potamaid.configuration.mcp.port": "Game MCP Port",
+  "potamaid.configuration.mcp.requestTimeoutSeconds": "Snapshot Timeout (seconds)",
+  "potamaid.configuration.bridge": "PotamAId Bridge",
+  "potamaid.configuration.bridge.enabled": "Connect to Bridge",
+  "potamaid.configuration.bridge.projectRoot": "Project Folder Override (empty = automatic)",
   "commands.potamaid.info.result": "Game information: %s",
   "itemGroup.potamaid": "Example Mod Tab",
   "block.potamaid.example_block": "Example Block",

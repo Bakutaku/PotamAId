@@ -5,12 +5,15 @@
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { once } from 'node:events';
+import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderStatus } from '../shared/domain';
 import { BridgeCore } from './BridgeCore';
@@ -46,6 +49,7 @@ class FakeProvider implements AiProvider {
   readonly displayName = 'Codex';
   readonly scripts: TurnScript[] = [];
   readonly sessions: SessionOptions[] = [];
+  readonly resumedOptions: SessionOptions[] = [];
   readonly inputs: TurnInput[] = [];
   private count = 0;
 
@@ -62,7 +66,11 @@ class FakeProvider implements AiProvider {
     this.sessions.push(options);
     return this.session(`session-${++this.count}`);
   }
-  async resumeSession(sessionId: string): Promise<AiSession> {
+  async resumeSession(
+    sessionId: string,
+    options: SessionOptions,
+  ): Promise<AiSession> {
+    this.resumedOptions.push(options);
     return this.session(sessionId);
   }
   async dispose(): Promise<void> {}
@@ -147,6 +155,7 @@ describe('BridgeCore', () => {
     provider = new FakeProvider();
     core = new BridgeCore({
       databasePath: ':memory:',
+      modConnectionDirectory: path.join(repo.worktreesDir, 'connection'),
       worktreesDir: repo.worktreesDir,
       createProviders: () => [provider],
     });
@@ -188,6 +197,101 @@ describe('BridgeCore', () => {
     );
     return { project, goal };
   }
+
+  it('接続中のゲーム MCP を計画・タスク・既存相談の次の実行へ渡す', async () => {
+    const project = await core.addProject(dir);
+    provider.scripts.push(async () => completed('接続前の回答'));
+    const consult = await core.createConsult(project.id, '接続前', DEFAULT_RUN);
+    await vi.waitFor(() =>
+      expect(core.snapshot().consults[0]?.status).toBe('idle'),
+    );
+    core.start();
+    const file = path.join(repo.worktreesDir, 'connection', 'bridge.json');
+    await vi.waitFor(() => expect(existsSync(file)).toBe(true), {
+      timeout: 5000,
+    });
+    const info = JSON.parse(readFileSync(file, 'utf8'));
+    const ws = new WebSocket(info.url, {
+      headers: { Authorization: `Bearer ${info.token}` },
+    });
+    try {
+      await once(ws, 'open');
+      const welcome = once(ws, 'message');
+      const gameInstanceId = '00000000-0000-4000-8000-000000000001';
+      const gameDirectory = path.join(dir, 'run');
+      mkdirSync(gameDirectory);
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          protocolVersion: 1,
+          gameInstanceId,
+          projectRoot: '',
+          gameDirectory,
+        }),
+      );
+      await welcome;
+      ws.send(
+        JSON.stringify({
+          type: 'game_state',
+          gameInstanceId,
+          worldAvailable: true,
+          mcpAvailable: true,
+          mcp: {
+            url: 'http://127.0.0.1:38281/mcp',
+            headers: { Authorization: 'Bearer ' + 'a'.repeat(64) },
+          },
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(core.snapshot().games?.[project.id]?.state).toBe('available'),
+      );
+      provider.scripts.push(async () => completed('接続後の回答'));
+      await core.sendConsultMessage(consult.id, '現在地と手持ちは？');
+      await vi.waitFor(() => expect(provider.resumedOptions).toHaveLength(1));
+      expect(provider.resumedOptions[0].mcpServers?.map((s) => s.name)).toEqual(
+        ['potamaid_bridge', 'potamaid_game'],
+      );
+      await vi.waitFor(() =>
+        expect(core.snapshot().consults[0]?.status).toBe('idle'),
+      );
+      provider.scripts.push(async () => completed(planJson));
+      const goal = await core.createGoal(project.id, '計画', DEFAULT_RUN);
+      await vi.waitFor(() => expect(goalStatus(goal.id)).toBe('planReview'));
+      expect(
+        provider.sessions
+          .at(-1)
+          ?.mcpServers?.some((s) => s.name === 'potamaid_game'),
+      ).toBe(true);
+      provider.scripts.push(
+        writing('one.txt', 'one'),
+        writing('two.txt', 'two'),
+      );
+      await core.approvePlan(goal.id);
+      await vi.waitFor(() => expect(goalStatus(goal.id)).toBe('review'), {
+        timeout: 5000,
+      });
+      expect(
+        provider.sessions
+          .at(-1)
+          ?.mcpServers?.some((s) => s.name === 'potamaid_game'),
+      ).toBe(true);
+      ws.close();
+      await once(ws, 'close');
+      await vi.waitFor(() =>
+        expect(core.snapshot().games?.[project.id]?.state).toBe('disconnected'),
+      );
+      provider.scripts.push(async () => completed('切断後の回答'));
+      await core.sendConsultMessage(consult.id, 'もう一度');
+      await vi.waitFor(() => expect(provider.resumedOptions).toHaveLength(2));
+      expect(
+        provider.resumedOptions[1].mcpServers?.some(
+          (s) => s.name === 'potamaid_game',
+        ),
+      ).toBe(false);
+    } finally {
+      ws.terminate();
+    }
+  });
 
   it('計画を作り、承認するとタスクを依存関係の順に実行する', async () => {
     const { goal } = await approvedGoal();
@@ -425,7 +529,10 @@ describe('BridgeCore', () => {
       writing('README.md', '目標の変更と利用者の変更\n'),
     );
     await core.approvePlan(goal.id);
-    await vi.waitFor(() => expect(goalStatus()).toBe('review'));
+    // 複数タスクの Git 操作を待つため、負荷のある環境でも1秒で打ち切らない。
+    await vi.waitFor(() => expect(goalStatus()).toBe('review'), {
+      timeout: 5000,
+    });
     const conflict = taskByNumber(3)!;
     expect(conflict.title).toContain('競合の解消');
     expect(conflict.weight).toBe('heavy');
@@ -1135,6 +1242,7 @@ describe('BridgeCore の起動時の後片付け', () => {
       const provider = new FakeProvider();
       const core = new BridgeCore({
         databasePath,
+        modConnectionDirectory: path.join(dir, 'connection'),
         worktreesDir: path.join(dir, 'worktrees'),
         createProviders: () => [provider],
       });
