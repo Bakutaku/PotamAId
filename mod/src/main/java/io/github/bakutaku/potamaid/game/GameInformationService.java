@@ -30,11 +30,9 @@ import net.neoforged.fml.ModList;
 public final class GameInformationService {
     /** ブロックエンティティの NBT の最大文字数。チェストなど大きいものを丸ごと AI に渡さない。 */
     private static final int MAX_NBT_CHARS = 16 * 1024;
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(runnable -> {
-        var thread = new Thread(runnable, "PotamAId game worker");
-        thread.setDaemon(true);
-        return thread;
-    });
+    // ログの読み取りと NBT の文字列化は互いに待たせないよう、別々のスレッドで行う。
+    private static final ExecutorService LOG_READER = worker("PotamAId game log reader");
+    private static final ExecutorService NBT_WORKER = worker("PotamAId game NBT formatter");
 
     private final MinecraftServer server;
 
@@ -55,7 +53,7 @@ public final class GameInformationService {
         // 巨大な NBT の文字列化でサーバースレッドを占有しないよう、ゲームの状態を読む部分だけをサーバースレッドで行う。
         // NBT は読み取り時点の独立したコピーなので、文字列化は別スレッドで行ってよい。
         return onServerThread(timeout, () -> captureTargetBlock(playerId))
-                .thenApplyAsync(CapturedTarget::finish, WORKER)
+                .thenApplyAsync(CapturedTarget::finish, NBT_WORKER)
                 .orTimeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
     }
 
@@ -72,7 +70,7 @@ public final class GameInformationService {
         checkTimeout(timeout);
         return CompletableFuture.supplyAsync(
                         () -> GameLogs.readTail(gameDirectory.resolve("logs").resolve("latest.log"), GameLogs.MAX_BYTES),
-                        WORKER)
+                        LOG_READER)
                 .orTimeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
     }
 
@@ -96,6 +94,14 @@ public final class GameInformationService {
             result.completeExceptionally(exception);
         }
         return result;
+    }
+
+    private static ExecutorService worker(String name) {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            var thread = new Thread(runnable, name);
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     private static void checkTimeout(Duration timeout) {
@@ -158,7 +164,7 @@ public final class GameInformationService {
             return new CapturedTarget(block, null, null);
         }
         return new CapturedTarget(block, BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(),
-                entity.saveWithFullMetadata(server.registryAccess()));
+                entity.saveWithFullMetadata(server.registryAccess()).copy());
     }
 
     public ModEnvironment getModEnvironmentNow() {
