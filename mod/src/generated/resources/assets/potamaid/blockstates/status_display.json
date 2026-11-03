@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "potamaid:block/status_display",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "potamaid:block/status_display"
+    },
+    "facing=south": {
+      "model": "potamaid:block/status_display",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "potamaid:block/status_display",
+      "y": 270
+    }
+  }
+}

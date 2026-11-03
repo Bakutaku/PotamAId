@@ -16,6 +16,6 @@ final class ModBlockTags extends BlockTagsProvider {
     @Override
     protected void addTags(HolderLookup.Provider provider) {
         tag(BlockTags.MINEABLE_WITH_AXE).add(PotamAId.CONSULT_DESK.get());
-        tag(BlockTags.MINEABLE_WITH_PICKAXE).add(PotamAId.PROGRESS_BOARD.get(), PotamAId.NOTICE_LAMP.get(), PotamAId.DEBUG_DISPLAY.get());
+        tag(BlockTags.MINEABLE_WITH_PICKAXE).add(PotamAId.PROGRESS_BOARD.get(), PotamAId.NOTICE_LAMP.get(), PotamAId.STATUS_DISPLAY.get());
     }
 }

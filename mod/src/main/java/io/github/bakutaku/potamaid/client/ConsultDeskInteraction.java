@@ -2,6 +2,10 @@ package io.github.bakutaku.potamaid.client;
 
 import io.github.bakutaku.potamaid.PotamAId;
 import io.github.bakutaku.potamaid.block.HologramBlock;
+import io.github.bakutaku.potamaid.client.hologram.StatusDisplayRenderer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.block.Block;
@@ -12,6 +16,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
 /**
  * 相談デスクとホログラムのブロックの右クリックはクライアントで取り消し、論理サーバーへ送らない。
+ * 状態ディスプレイはページを切り替え、それ以外は相談画面を開く。
  * ブロック本体は画面を知らないので、専用サーバーでも安全に読み込める。
  */
 @EventBusSubscriber(modid = PotamAId.MODID, value = Dist.CLIENT)
@@ -26,6 +31,13 @@ public final class ConsultDeskInteraction {
         if (block != PotamAId.CONSULT_DESK.get() && !(block instanceof HologramBlock)) return;
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
-        if (event.getHand() == InteractionHand.MAIN_HAND) ConsultScreen.open();
+        if (event.getHand() != InteractionHand.MAIN_HAND) return;
+        if (block == PotamAId.STATUS_DISPLAY.get()) {
+            if (StatusDisplayRenderer.nextPage(event.getLevel(), event.getPos())) {
+                Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.4f));
+            }
+        } else {
+            ConsultScreen.open();
+        }
     }
 }

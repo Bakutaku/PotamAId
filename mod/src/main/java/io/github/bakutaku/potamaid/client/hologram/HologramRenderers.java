@@ -16,6 +16,6 @@ public final class HologramRenderers {
     public static void register(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(PotamAId.PROGRESS_BOARD_ENTITY.get(), ProgressBoardRenderer::new);
         event.registerBlockEntityRenderer(PotamAId.NOTICE_LAMP_ENTITY.get(), NoticeLampRenderer::new);
-        event.registerBlockEntityRenderer(PotamAId.DEBUG_DISPLAY_ENTITY.get(), DebugDisplayRenderer::new);
+        event.registerBlockEntityRenderer(PotamAId.STATUS_DISPLAY_ENTITY.get(), StatusDisplayRenderer::new);
     }
 }

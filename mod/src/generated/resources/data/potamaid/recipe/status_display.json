@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "A": {
+      "item": "minecraft:amethyst_shard"
+    },
+    "C": {
+      "item": "minecraft:comparator"
+    },
+    "G": {
+      "item": "minecraft:glass_pane"
+    },
+    "S": {
+      "item": "minecraft:stone_slab"
+    }
+  },
+  "pattern": [
+    "GGG",
+    "ACA",
+    "SSS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "potamaid:status_display"
+  }
+}

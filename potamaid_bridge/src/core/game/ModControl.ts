@@ -54,6 +54,8 @@ const taskView = (t: Task) => ({
   result: clip(t.result, 500),
   error: clip(t.error, 500),
   needsGameRestart: t.needsGameRestart,
+  // ゲーム内の状態ディスプレイで経過時間を出すため（同じ PC の時計の Unix ミリ秒）。
+  startedAt: t.startedAt,
 });
 const paged = <T>(items: T[], page: number) => ({
   items: items.slice((page - 1) * 5, page * 5),

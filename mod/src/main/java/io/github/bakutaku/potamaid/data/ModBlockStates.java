@@ -29,8 +29,8 @@ final class ModBlockStates extends BlockStateProvider {
 
         horizontal(PotamAId.PROGRESS_BOARD.get(), panelModel("progress_board", "minecraft:block/cyan_terracotta"));
         horizontal(PotamAId.NOTICE_LAMP.get(), panelModel("notice_lamp", "minecraft:block/orange_terracotta"));
-        // 開発用の情報ディスプレイは、表の面も縁も専用のテクスチャで普通の看板と見分ける。
-        horizontal(PotamAId.DEBUG_DISPLAY.get(), panelModel("debug_display", PotamAId.MODID + ":block/debug_display_plate", PotamAId.MODID + ":block/debug_display_casing"));
+        // 状態ディスプレイは、表の面も縁も専用のテクスチャで進捗ボードと見分ける。
+        horizontal(PotamAId.STATUS_DISPLAY.get(), panelModel("status_display", PotamAId.MODID + ":block/status_display_plate", PotamAId.MODID + ":block/status_display_casing"));
     }
 
     /** 北向きで作ったモデルを、FACING に合わせて回す。 */

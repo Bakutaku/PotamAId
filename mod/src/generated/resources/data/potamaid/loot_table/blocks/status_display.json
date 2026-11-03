@@ -11,11 +11,11 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "potamaid:debug_display"
+          "name": "potamaid:status_display"
         }
       ],
       "rolls": 1.0
     }
   ],
-  "random_sequence": "potamaid:blocks/debug_display"
+  "random_sequence": "potamaid:blocks/status_display"
 }

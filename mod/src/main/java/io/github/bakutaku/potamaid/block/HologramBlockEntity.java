@@ -7,7 +7,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 描画のためだけの BlockEntity。保存するデータも通信も持たない。
- * 連結した看板の形や、アニメーションの途中経過（クライアントの描画でだけ使う値）を持つ。
+ * 連結した看板の形や、アニメーションの途中経過・状態ディスプレイのページ（クライアントの描画でだけ使う値）を持つ。
  */
 public class HologramBlockEntity extends BlockEntity {
     /** 連結した看板の中でのこのブロックの位置（左上が 0, 0）と、看板の大きさ（ブロック単位）。クライアントの描画だけが読み書きする。 */
@@ -18,6 +18,8 @@ public class HologramBlockEntity extends BlockEntity {
     public float shownProgress;
     public String shownKey = "";
     public long lastFrameMillis;
+    /** 状態ディスプレイで映しているページ（連結した看板の左上のブロックが持つ）。クライアントだけが持ち、保存も同期もしない。 */
+    public int displayPage;
 
     public HologramBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);

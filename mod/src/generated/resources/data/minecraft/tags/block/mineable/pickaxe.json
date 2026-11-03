@@ -2,6 +2,6 @@
   "values": [
     "potamaid:progress_board",
     "potamaid:notice_lamp",
-    "potamaid:debug_display"
+    "potamaid:status_display"
   ]
 }

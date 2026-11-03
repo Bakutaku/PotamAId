@@ -46,8 +46,8 @@
     }
   ],
   "textures": {
-    "edge": "potamaid:block/debug_display_casing",
-    "particle": "potamaid:block/debug_display_plate",
-    "plate": "potamaid:block/debug_display_plate"
+    "edge": "potamaid:block/status_display_casing",
+    "particle": "potamaid:block/status_display_plate",
+    "plate": "potamaid:block/status_display_plate"
   }
 }
