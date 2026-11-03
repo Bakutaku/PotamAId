@@ -53,6 +53,11 @@ public final class BridgeChat {
             }
             case "disconnected" -> line(Component.translatable("commands.potamaid.bridge.disconnected"));
             case "notice" -> line(Component.literal(value(message, "title") + ": " + value(message, "body")));
+            case "approval_resolved" -> {
+                // 自分の回答は応答で表示済み。Bridge の画面で回答・取り消されたときだけ知らせる。
+                String by = value(message, "by");
+                if (!by.equals("game")) line(Component.translatable("commands.potamaid.bridge.approvalResolved." + (by.equals("cancel") ? "cancel" : "app"), value(message, "id").substring(0, Math.min(8, value(message, "id").length()))));
+            }
             case "consult_state" -> {
                 item(message.getAsJsonObject("consult"));
                 if (!value(message, "answer").isBlank()) line(Component.literal(value(message, "answer")));
@@ -64,6 +69,7 @@ public final class BridgeChat {
     private void render(JsonObject data) {
         switch (value(data, "kind")) {
             case "status" -> line(Component.translatable("commands.potamaid.bridge.status", value(data, "name"), value(data, "goals"), value(data, "tasks"), value(data, "consults"), value(data, "approvals"), value(data, "selected")));
+            case "approval_progress" -> line(Component.translatable("commands.potamaid.bridge.approvalProgress", data.getAsJsonArray("remaining").toString()));
             case "accepted" -> line(Component.translatable("commands.potamaid.bridge.accepted"));
             case "consult" -> item(data.getAsJsonObject("consult"));
             case "goal" -> item(data.getAsJsonObject("goal"));
@@ -90,7 +96,7 @@ public final class BridgeChat {
         line(Component.literal(value(item, "id") + " " + value(item, "title") + " [")
                 .append(Component.translatable("commands.potamaid.bridge.state." + state)).append("]"));
         for (String field : new String[] { "summary", "latest", "result", "error" }) {
-            if (!value(item, field).isBlank()) line(Component.literal(value(item, field)));
+            for (String text : value(item, field).split("\n")) if (!text.isBlank()) line(Component.literal(text));
         }
         if (value(item, "needsGameRestart").equals("true")) line(Component.translatable("commands.potamaid.bridge.restart"));
     }

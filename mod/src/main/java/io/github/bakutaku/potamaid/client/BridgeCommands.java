@@ -42,7 +42,13 @@ public final class BridgeCommands {
         var root = Commands.literal(PotamAId.MODID)
                 .executes(c -> { BridgeChat.line(Component.translatable("commands.potamaid.bridge.help")); return 1; })
                 .then(Commands.literal("status").executes(c -> send(object("action", "status"))))
-                .then(consult).then(pages("goals", "goals"));
+                .then(consult).then(pages("goals", "goals")).then(pages("approvals", "approvals"))
+                .then(Commands.literal("approval").then(Commands.argument("id", StringArgumentType.word())
+                        .then(decision("allow", "allow")).then(decision("always", "allowForSession")).then(decision("deny", "deny"))
+                        .then(Commands.literal("answer").then(Commands.argument("question", IntegerArgumentType.integer(1, 20))
+                                .then(Commands.argument("value", StringArgumentType.greedyString())
+                                        .executes(c -> send(object("action", "approval_answer", "id", StringArgumentType.getString(c, "id"),
+                                                "question", IntegerArgumentType.getInteger(c, "question"), "value", StringArgumentType.getString(c, "value")))))))));
         for (String owner : new String[] { "goal", "task" }) {
             var target = Commands.argument("id", StringArgumentType.word())
                     .executes(c -> send(object("action", owner, "id", StringArgumentType.getString(c, "id"))));
@@ -52,9 +58,18 @@ public final class BridgeCommands {
                     .executes(c -> send(object("action", "history", "owner", owner, "id", StringArgumentType.getString(c, "id"))))
                     .then(Commands.argument("before", IntegerArgumentType.integer(1))
                             .executes(c -> send(object("action", "history", "owner", owner, "id", StringArgumentType.getString(c, "id"), "before", IntegerArgumentType.getInteger(c, "before"))))));
+            if (owner.equals("goal")) target.then(Commands.literal("approve")
+                    .executes(c -> send(object("action", "goal_approve", "id", StringArgumentType.getString(c, "id")))));
+            else for (String operation : new String[] { "cancel", "resume" }) target.then(Commands.literal(operation)
+                    .executes(c -> send(object("action", "task_" + operation, "id", StringArgumentType.getString(c, "id")))));
             root.then(Commands.literal(owner).then(target));
         }
         event.getDispatcher().register(root);
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> decision(String literal, String decision) {
+        return Commands.literal(literal).executes(c -> send(object("action", "approval_respond",
+                "id", StringArgumentType.getString(c, "id"), "decision", decision)));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> pages(String command, String action) {

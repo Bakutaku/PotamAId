@@ -1415,6 +1415,392 @@ describe('BridgeCore', () => {
     );
     expect(core.snapshot().approvals).toHaveLength(0);
   });
+
+  /** ゲームのクライアントとして接続する（ゲーム内の操作のテスト用） */
+  async function connectGame() {
+    core.start();
+    const file = path.join(repo.worktreesDir, 'connection', 'bridge.json');
+    await vi.waitFor(() => expect(existsSync(file)).toBe(true));
+    const info = JSON.parse(readFileSync(file, 'utf8'));
+    const gameInstanceId = randomUUID();
+    const ws = new WebSocket(info.url, {
+      headers: { Authorization: `Bearer ${info.token}` },
+    });
+    const messages: any[] = [];
+    ws.on('message', (bytes) => messages.push(JSON.parse(bytes.toString())));
+    await once(ws, 'open');
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        protocolVersion: 2,
+        gameInstanceId,
+        projectRoot: dir,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(messages.some((m) => m.type === 'welcome')).toBe(true),
+    );
+    const request = async (operation: unknown) => {
+      const requestId = randomUUID();
+      ws.send(
+        JSON.stringify({
+          type: 'request',
+          requestId,
+          gameInstanceId,
+          operation,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(messages.some((m) => m.requestId === requestId)).toBe(true),
+      );
+      return messages.find((m) => m.requestId === requestId);
+    };
+    return { ws, messages, request };
+  }
+
+  /** 承認を求めて、回答を記録してから完了する相談の台本 */
+  const asking =
+    (
+      request: Parameters<TurnHandlers['onApprovalRequest']>[0],
+      answers: unknown[],
+    ): TurnScript =>
+    async ({ handlers }) => {
+      answers.push(await handlers.onApprovalRequest(request));
+      return completed('終わりました');
+    };
+
+  it('ゲーム内から計画を承認し、タスクを中止・再開できる。対象mod外と余分な項目は拒否する', async () => {
+    const { goal } = await approvedGoal();
+    const otherDir = path.join(dir, 'other');
+    mkdirSync(otherDir);
+    const other = await core.addProject(otherDir);
+    provider.scripts.push(async () => completed(planJson));
+    const foreign = await core.createGoal(other.id, '別の目標', DEFAULT_RUN);
+    await vi.waitFor(() => expect(goalStatus(foreign.id)).toBe('planReview'));
+    const ownTask = () =>
+      core.snapshot().tasks.find((t) => t.goalId === goal.id && t.number === 1);
+    const client = await connectGame();
+    try {
+      for (const operation of [
+        { action: 'goal_approve', id: foreign.id },
+        { action: 'goal_approve', id: goal.id, extra: true },
+        { action: 'task_cancel', id: core.snapshot().tasks[0].id, force: true },
+      ])
+        expect((await client.request(operation)).ok).toBe(false);
+      expect(goalStatus(foreign.id)).toBe('planReview');
+      expect(goalStatus(goal.id)).toBe('planReview');
+
+      provider.scripts.push(untilCancelled);
+      expect(
+        (await client.request({ action: 'goal_approve', id: goal.id })).ok,
+      ).toBe(true);
+      expect(goalStatus(goal.id)).toBe('active');
+      // 承認済みの計画は、もう一度承認できない
+      expect(
+        (await client.request({ action: 'goal_approve', id: goal.id })).ok,
+      ).toBe(false);
+      await vi.waitFor(() => expect(ownTask()?.status).toBe('running'));
+      const task = ownTask()!;
+
+      expect(
+        (await client.request({ action: 'task_resume', id: task.id })).ok,
+      ).toBe(false);
+      expect(
+        (await client.request({ action: 'task_cancel', id: task.id })).ok,
+      ).toBe(true);
+      await vi.waitFor(() => expect(ownTask()?.status).toBe('todo'));
+      expect(ownTask()?.paused).toBe(true);
+      provider.scripts.push(untilCancelled);
+      expect(
+        (await client.request({ action: 'task_resume', id: task.id })).ok,
+      ).toBe(true);
+      await vi.waitFor(() => expect(ownTask()?.status).toBe('running'));
+      await core.cancelAll();
+      await vi.waitFor(() => expect(core.hasActiveWork()).toBe(false));
+    } finally {
+      client.ws.close();
+    }
+  });
+
+  it('ゲーム内から承認に回答する。先に届いた回答だけが有効で、遅れた側には回答済みを返す', async () => {
+    const project = await core.addProject(dir);
+    const otherDir = path.join(dir, 'other');
+    mkdirSync(otherDir);
+    const other = await core.addProject(otherDir);
+    const answers: any[] = [];
+    const foreignAnswers: any[] = [];
+    provider.scripts.push(
+      asking(
+        { ...EMPTY_REQUEST, kind: 'command', command: 'gradlew build' },
+        foreignAnswers,
+      ),
+    );
+    await core.createConsult(other.id, '別の相談', DEFAULT_RUN);
+    await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(1));
+    const foreignApproval = core.snapshot().approvals[0];
+    const client = await connectGame();
+    try {
+      // 別の対象modの承認は、一覧にも出さず回答もできない
+      expect(
+        (await client.request({ action: 'approvals' })).data.items,
+      ).toEqual([]);
+      expect(
+        (
+          await client.request({
+            action: 'approval_respond',
+            id: foreignApproval.id,
+            decision: 'allow',
+          })
+        ).ok,
+      ).toBe(false);
+      expect(core.snapshot().approvals).toHaveLength(1);
+
+      // ゲーム内が先に許可する
+      provider.scripts.push(
+        asking(
+          {
+            ...EMPTY_REQUEST,
+            kind: 'command',
+            command: 'gradlew runData',
+            reason: 'データ生成',
+          },
+          answers,
+        ),
+      );
+      await core.createConsult(project.id, '許可の相談', DEFAULT_RUN);
+      await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(2));
+      const listed = (await client.request({ action: 'approvals' })).data.items;
+      expect(listed).toHaveLength(1);
+      expect(listed[0].summary).toContain('gradlew runData');
+      expect(listed[0].summary).toContain('/potamaid approval');
+      const id = listed[0].id;
+      expect(
+        (
+          await client.request({
+            action: 'approval_respond',
+            id,
+            decision: 'allowForSession',
+          })
+        ).ok,
+      ).toBe(true);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+      expect(answers[0].decision).toBe('allowForSession');
+      expect(
+        client.messages.find((m) => m.type === 'approval_resolved'),
+      ).toEqual({
+        type: 'approval_resolved',
+        id,
+        by: 'game',
+        decision: 'allowForSession',
+      });
+      // 遅れた Bridge の画面の回答は、ゲーム内で回答済みと分かる
+      await expect(
+        core.respondApproval(id, { decision: 'deny' }),
+      ).rejects.toThrow('先にゲーム内で回答済み');
+      expect(answers).toHaveLength(1);
+
+      // Bridge の画面が先に拒否し、遅れたゲーム内の回答は回答済みになる
+      provider.scripts.push(
+        asking(
+          { ...EMPTY_REQUEST, kind: 'command', command: 'rm -rf build' },
+          answers,
+        ),
+      );
+      await core.createConsult(project.id, '拒否の相談', DEFAULT_RUN);
+      await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(2));
+      const second = (await client.request({ action: 'approvals' })).data
+        .items[0].id;
+      await core.respondApproval(second, { decision: 'deny' });
+      const late = await client.request({
+        action: 'approval_respond',
+        id: second,
+        decision: 'allow',
+      });
+      expect(late.ok).toBe(false);
+      expect(late.error).toContain('先に Bridge の画面で回答済み');
+      expect(
+        client.messages.some(
+          (m) =>
+            m.type === 'approval_resolved' && m.id === second && m.by === 'app',
+        ),
+      ).toBe(true);
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      expect(answers[1].decision).toBe('deny');
+    } finally {
+      client.ws.close();
+      await core.cancelAll();
+    }
+  });
+
+  it('ゲーム内から質問に答える。秘密の質問とフォーム・URL は許可できず、拒否だけできる', async () => {
+    const project = await core.addProject(dir);
+    const answers: any[] = [];
+    provider.scripts.push(
+      asking(
+        {
+          ...EMPTY_REQUEST,
+          kind: 'question',
+          questions: [
+            {
+              id: 'q1',
+              header: '対象',
+              question: 'どのブロックですか？',
+              options: [
+                { label: '粉砕機', description: '' },
+                { label: '炉', description: '' },
+              ],
+              allowOther: false,
+              secret: false,
+            },
+            {
+              id: 'q2',
+              header: '名前',
+              question: '名前は？',
+              options: [],
+              allowOther: true,
+              secret: false,
+            },
+          ],
+        },
+        answers,
+      ),
+    );
+    await core.createConsult(project.id, '質問', DEFAULT_RUN);
+    await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(1));
+    const client = await connectGame();
+    try {
+      const id = core.snapshot().approvals[0].id;
+      const item = (await client.request({ action: 'approvals' })).data
+        .items[0];
+      expect(item.summary).toContain('1) 粉砕機');
+      expect(item.summary).toContain('answer <質問番号>');
+      // 選択肢の番号の範囲外・選択肢だけの質問への自由文・許可の直接指定は拒否する
+      for (const operation of [
+        { action: 'approval_answer', id, question: 1, value: '3' },
+        { action: 'approval_answer', id, question: 1, value: '自由文' },
+        { action: 'approval_answer', id, question: 3, value: '1' },
+        { action: 'approval_respond', id, decision: 'allow' },
+      ])
+        expect((await client.request(operation)).ok).toBe(false);
+      const partial = await client.request({
+        action: 'approval_answer',
+        id,
+        question: 2,
+        value: 'ポタム',
+      });
+      expect(partial.data).toEqual({
+        kind: 'approval_progress',
+        remaining: [1],
+      });
+      expect(answers).toHaveLength(0);
+      expect(
+        (
+          await client.request({
+            action: 'approval_answer',
+            id,
+            question: 1,
+            value: '2',
+          })
+        ).data.kind,
+      ).toBe('accepted');
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+      expect(answers[0]).toEqual({
+        decision: 'allow',
+        answers: { q1: ['炉'], q2: ['ポタム'] },
+      });
+
+      // 秘密の質問は、ゲーム内の入力を受け付けない
+      provider.scripts.push(
+        asking(
+          {
+            ...EMPTY_REQUEST,
+            kind: 'question',
+            questions: [
+              {
+                id: 'p',
+                header: 'パスワード',
+                question: 'パスワードは？',
+                options: [],
+                allowOther: true,
+                secret: true,
+              },
+            ],
+          },
+          answers,
+        ),
+      );
+      const consult = await core.createConsult(
+        project.id,
+        '秘密の質問',
+        DEFAULT_RUN,
+      );
+      await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(1));
+      const secretId = core.snapshot().approvals[0].id;
+      const refused = await client.request({
+        action: 'approval_answer',
+        id: secretId,
+        question: 1,
+        value: 'hunter2',
+      });
+      expect(refused.ok).toBe(false);
+      expect(core.snapshot().approvals).toHaveLength(1);
+      expect(
+        (
+          await client.request({
+            action: 'approval_respond',
+            id: secretId,
+            decision: 'deny',
+          })
+        ).ok,
+      ).toBe(true);
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      expect(answers[1]).toEqual({ decision: 'deny' });
+      const events = await core.getProgressEvents({
+        type: 'consult',
+        id: consult.id,
+      });
+      expect(JSON.stringify([events, client.messages])).not.toContain(
+        'hunter2',
+      );
+
+      // フォームと URL は、ゲーム内では拒否だけできる
+      for (const request of [
+        { ...EMPTY_REQUEST, kind: 'form' as const, source: 'mcp' },
+        { ...EMPTY_REQUEST, kind: 'url' as const, url: 'https://example.com' },
+      ]) {
+        provider.scripts.push(asking(request, answers));
+        await core.createConsult(project.id, request.kind, DEFAULT_RUN);
+        await vi.waitFor(() =>
+          expect(core.snapshot().approvals).toHaveLength(1),
+        );
+        const formId = core.snapshot().approvals[0].id;
+        expect(
+          (
+            await client.request({
+              action: 'approval_respond',
+              id: formId,
+              decision: 'allow',
+            })
+          ).ok,
+        ).toBe(false);
+        expect(
+          (
+            await client.request({
+              action: 'approval_respond',
+              id: formId,
+              decision: 'deny',
+            })
+          ).ok,
+        ).toBe(true);
+        await vi.waitFor(() =>
+          expect(core.snapshot().approvals).toHaveLength(0),
+        );
+      }
+    } finally {
+      client.ws.close();
+      await core.cancelAll();
+    }
+  });
 });
 
 describe('BridgeCore の起動時の後片付け', () => {

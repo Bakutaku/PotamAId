@@ -177,7 +177,7 @@ public final class BridgeConnection implements AutoCloseable {
                         } else if (welcomed && type.equals("response")) {
                             var request = pending.remove(json.get("requestId").getAsString());
                             if (request != null) request.result().complete(json);
-                        } else if (welcomed && (type.equals("consult_state") || type.equals("notice"))) {
+                        } else if (welcomed && (type.equals("consult_state") || type.equals("notice") || type.equals("approval_resolved"))) {
                             messages.accept(json);
                         } else if (type.equals("error")) {
                             // 相手の自由文をログへ転記しない。

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import type { BridgeCore } from '../BridgeCore';
-import type { Consult, Goal, ProgressOwner, Task } from '../../shared/domain';
+import type {
+  Approval,
+  Consult,
+  Goal,
+  ProgressOwner,
+  Task,
+} from '../../shared/domain';
+import { describeApproval } from '../../shared/approvals';
 
 const id = z.string().min(8).max(36);
 const page = z.number().int().min(1).max(1_000_000).default(1);
@@ -15,6 +22,25 @@ const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('goals'), page }).strict(),
   z.object({ action: z.literal('goal'), id, page }).strict(),
   z.object({ action: z.literal('task'), id }).strict(),
+  z.object({ action: z.literal('approvals'), page }).strict(),
+  z
+    .object({
+      action: z.literal('approval_respond'),
+      id,
+      decision: z.enum(['allow', 'allowForSession', 'deny']),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('approval_answer'),
+      id,
+      question: z.number().int().min(1).max(20),
+      value: z.string().trim().min(1).max(500),
+    })
+    .strict(),
+  z.object({ action: z.literal('goal_approve'), id }).strict(),
+  z.object({ action: z.literal('task_cancel'), id }).strict(),
+  z.object({ action: z.literal('task_resume'), id }).strict(),
   z
     .object({
       action: z.literal('history'),
@@ -24,6 +50,18 @@ const actionSchema = z.discriminatedUnion('action', [
     })
     .strict(),
 ]);
+
+/** ゲームの画面にそのまま見せてよい、固定の文面のエラー（スタックなどを含む例外は見せない） */
+export class GameOperationError extends Error {}
+
+/** 中の処理（BridgeCore）が投げる、ゲームに見せてよい固定の文面 */
+const SAFE_CORE_ERRORS = [
+  '計画を作り直している間は承認できません',
+  'タスクがありません',
+  '承認の処理中です',
+  'このタスクは実行していません',
+  '停止中のタスクだけ再開できます',
+];
 
 const clip = (value: string | null, max = 2000) =>
   value && value.length > max
@@ -57,6 +95,43 @@ const taskView = (t: Task) => ({
   // ゲーム内の状態ディスプレイで経過時間を出すため（同じ PC の時計の Unix ミリ秒）。
   startedAt: t.startedAt,
 });
+/** 承認の案内に使う ID。ID は先頭8文字以上で指定できる */
+const shortId = (value: string) => value.slice(0, 8);
+
+const approvalLines = (a: Approval): string[] => {
+  const id = shortId(a.id);
+  const lines: string[] = [];
+  if (a.kind === 'command') {
+    lines.push(`コマンド: ${a.command ?? ''}`);
+    if (a.cwd) lines.push(`場所: ${a.cwd}`);
+  } else if (a.kind === 'fileChange') {
+    lines.push(`ファイルの変更: ${a.files.join('、')}`);
+  } else if (a.kind === 'question') {
+    a.questions.forEach((q, i) => {
+      lines.push(
+        `質問${i + 1}: ${q.header ? `${q.header} ` : ''}${q.question}`,
+      );
+      if (q.secret)
+        lines.push('  （秘密の回答のため、Bridge で回答してください）');
+      q.options.forEach((o, n) => lines.push(`  ${n + 1}) ${o.label}`));
+    });
+  } else {
+    lines.push(describeApproval(a));
+    if (a.message) lines.push(a.message);
+    if (a.url) lines.push(`URL: ${a.url}`);
+  }
+  if (a.reason) lines.push(`理由: ${a.reason}`);
+  if (a.kind === 'command' || a.kind === 'fileChange')
+    lines.push(
+      `/potamaid approval ${id} allow | always（このセッションの間は許可） | deny`,
+    );
+  else if (a.kind === 'question' && !a.questions.some((q) => q.secret))
+    lines.push(
+      `/potamaid approval ${id} answer <質問番号> <選択肢の番号か回答> | deny`,
+    );
+  else lines.push(`/potamaid approval ${id} deny（回答は Bridge で行います）`);
+  return lines;
+};
 const paged = <T>(items: T[], page: number) => ({
   items: items.slice((page - 1) * 5, page * 5),
   page,
@@ -66,6 +141,8 @@ const paged = <T>(items: T[], page: number) => ({
 /** 接続単位の選択と対象modの境界。表示先を持たず、将来のゲーム内 GUI でも使える。 */
 export class ModControl {
   private selected: string | null = null;
+  /** 質問への回答の途中経過。すべて答えたら送る（秘密の質問は受け付けない） */
+  private readonly partialAnswers = new Map<string, Map<string, string[]>>();
   private lastStatus: string | null = null;
   private since = 0;
   private readonly unsubscribe: (() => void)[];
@@ -77,6 +154,16 @@ export class ModControl {
   ) {
     this.unsubscribe = [
       core.events.on('changed', () => this.refresh()),
+      core.events.on('approvalResolved', (r) => {
+        if (r.projectId !== projectId) return;
+        this.partialAnswers.delete(r.approvalId);
+        this.send({
+          type: 'approval_resolved',
+          id: r.approvalId,
+          by: r.by,
+          decision: r.decision,
+        });
+      }),
       core.events.on('notification', (n) => {
         if ('projectId' in n.target && n.target.projectId === projectId)
           this.send({
@@ -85,7 +172,7 @@ export class ModControl {
             title: clip(n.title, 120),
             body:
               n.kind === 'approval'
-                ? 'Bridge で内容を確認して回答してください'
+                ? '/potamaid approvals で内容を確認して回答できます（Bridge の画面でも可）'
                 : clip(n.body, 300),
           });
       }),
@@ -93,6 +180,7 @@ export class ModControl {
   }
 
   close(): void {
+    this.partialAnswers.clear();
     for (const off of this.unsubscribe) off();
   }
 
@@ -105,8 +193,7 @@ export class ModControl {
       goals,
       tasks: s.tasks.filter((t) => goalIds.has(t.goalId)),
       consults: s.consults.filter((c) => c.projectId === this.projectId),
-      approvals: s.approvals.filter((a) => a.projectId === this.projectId)
-        .length,
+      approvals: s.approvals.filter((a) => a.projectId === this.projectId),
     };
   }
 
@@ -119,6 +206,43 @@ export class ModControl {
         '対象が見つからないか、ID の候補が複数あります。接続中の対象modの一覧を確認してください',
       );
     return matches[0];
+  }
+
+  /** 承認待ちを探す。見つからなくても、回答済みの承認なら先に回答した側を知らせる */
+  private pendingApproval(approvals: Approval[], prefix: string): Approval {
+    try {
+      return this.resolve(approvals, prefix);
+    } catch (error) {
+      const answered = this.core.resolvedApprovalError(this.projectId, prefix);
+      throw answered ? new GameOperationError(answered.message) : error;
+    }
+  }
+
+  private async safely<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (
+        SAFE_CORE_ERRORS.includes(message) ||
+        message.startsWith('この承認は')
+      )
+        throw new GameOperationError(message);
+      throw error;
+    }
+  }
+
+  private ownerTitle(
+    owner: ProgressOwner,
+    s: ReturnType<ModControl['snapshot']>,
+  ): string {
+    if (owner.type === 'task') {
+      const t = s.tasks.find((t) => t.id === owner.id);
+      return t ? `タスク #${t.number} ${t.title}` : 'タスク';
+    }
+    if (owner.type === 'goal')
+      return `計画: ${s.goals.find((g) => g.id === owner.id)?.title ?? '目標'}`;
+    return `相談: ${s.consults.find((c) => c.id === owner.id)?.title ?? ''}`;
   }
 
   private async history(owner: ProgressOwner, before?: number) {
@@ -159,7 +283,7 @@ export class ModControl {
           goals: s.goals.length,
           tasks: s.tasks.length,
           consults: s.consults.length,
-          approvals: s.approvals,
+          approvals: s.approvals.length,
           selected: this.selected,
         };
       case 'consult_list':
@@ -213,6 +337,99 @@ export class ModControl {
       }
       case 'task':
         return { kind: 'task', task: taskView(this.resolve(s.tasks, a.id)) };
+      case 'approvals':
+        return {
+          kind: 'approvals',
+          ...paged(
+            s.approvals.map((approval) => ({
+              id: approval.id,
+              title: clip(this.ownerTitle(approval.owner, s), 120),
+              status: 'approval',
+              summary: clip(approvalLines(approval).join('\n'), 1200),
+            })),
+            a.page,
+          ),
+        };
+      case 'approval_respond': {
+        const approval = this.pendingApproval(s.approvals, a.id);
+        const permission =
+          approval.kind === 'command' || approval.kind === 'fileChange';
+        // 質問・フォーム・URL の許可は回答の内容を伴うため、ゲーム内では拒否だけ受け付ける
+        if (!permission && a.decision !== 'deny')
+          throw new GameOperationError(
+            approval.kind === 'question'
+              ? 'この質問には approval <ID> answer <質問番号> <回答> で答えてください'
+              : 'この要求への回答は Bridge の画面で行ってください（拒否はゲーム内でもできます）',
+          );
+        await this.safely(() =>
+          this.core.respondApproval(
+            approval.id,
+            { decision: a.decision },
+            'game',
+          ),
+        );
+        return { kind: 'accepted' };
+      }
+      case 'approval_answer': {
+        const approval = this.pendingApproval(s.approvals, a.id);
+        if (approval.kind !== 'question')
+          throw new GameOperationError('回答できるのは AI からの質問だけです');
+        // 秘密の回答は、ゲーム内のチャットに入力させない
+        if (approval.questions.some((q) => q.secret))
+          throw new GameOperationError(
+            '秘密の回答を含む質問は、Bridge の画面で回答してください',
+          );
+        const question = approval.questions[a.question - 1];
+        if (!question)
+          throw new GameOperationError('質問番号が正しくありません');
+        let answer = a.value;
+        if (question.options.length > 0 && /^\d+$/.test(a.value)) {
+          const option = question.options[Number(a.value) - 1];
+          if (!option)
+            throw new GameOperationError('選択肢の番号が正しくありません');
+          answer = option.label;
+        } else if (!question.allowOther) {
+          throw new GameOperationError(
+            'この質問は選択肢の番号で答えてください',
+          );
+        }
+        const partial =
+          this.partialAnswers.get(approval.id) ?? new Map<string, string[]>();
+        partial.set(question.id, [answer]);
+        const remaining = approval.questions.flatMap((q, i) =>
+          partial.has(q.id) ? [] : [i + 1],
+        );
+        if (remaining.length > 0) {
+          this.partialAnswers.set(approval.id, partial);
+          return { kind: 'approval_progress', remaining };
+        }
+        await this.safely(() =>
+          this.core.respondApproval(
+            approval.id,
+            { decision: 'allow', answers: Object.fromEntries(partial) },
+            'game',
+          ),
+        );
+        this.partialAnswers.delete(approval.id);
+        return { kind: 'accepted' };
+      }
+      case 'goal_approve': {
+        const goal = this.resolve(s.goals, a.id);
+        if (goal.status !== 'planReview')
+          throw new GameOperationError('計画の確認待ちの目標だけ承認できます');
+        await this.safely(() => this.core.approvePlan(goal.id));
+        return { kind: 'accepted' };
+      }
+      case 'task_cancel':
+      case 'task_resume': {
+        const task = this.resolve(s.tasks, a.id);
+        await this.safely(() =>
+          a.action === 'task_cancel'
+            ? this.core.cancelTask(task.id)
+            : this.core.resumeTask(task.id),
+        );
+        return { kind: 'accepted' };
+      }
       case 'history': {
         const prefix = a.id ?? (a.owner === 'consult' ? this.selected : null);
         if (!prefix)

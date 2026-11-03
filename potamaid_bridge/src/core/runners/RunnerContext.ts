@@ -18,7 +18,7 @@ import type {
 import type { ResolvedRun } from '../../shared/runConfig';
 import { describeApproval, isPermissionRequest } from '../../shared/approvals';
 import type { StreamingText, UiCommand } from '../../shared/ipc';
-import type { ApprovalBroker } from '../ApprovalBroker';
+import type { ApprovalBroker, ApprovalResolution } from '../ApprovalBroker';
 import type { TypedEmitter } from '../events';
 import type { BridgeMcpServer, SessionScope } from '../mcp/BridgeMcpServer';
 import type {
@@ -42,6 +42,8 @@ export interface CoreEvents extends Record<string, unknown> {
   progress: ProgressEvent;
   streaming: StreamingText;
   notification: BridgeNotification;
+  /** 承認が解決された（ゲーム内と画面の表示を同期するため） */
+  approvalResolved: ApprovalResolution;
 }
 
 /** ユーザーの対応が必要になったことの知らせ（仕様書3章「通知」）。デスクトップ通知に使う */

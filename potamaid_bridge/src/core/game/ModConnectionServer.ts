@@ -10,7 +10,7 @@ import type { GameConnectionStatus, Project } from '../../shared/domain';
 import type { McpServerConfig } from '../providers/AiProvider';
 import { writePrivateJson } from './privateFiles';
 import { matchProject, ProjectMatchError } from './matchProject';
-import type { ModControl } from './ModControl';
+import { GameOperationError, type ModControl } from './ModControl';
 
 const helloSchema = z.object({
   type: z.literal('hello'),
@@ -322,9 +322,10 @@ export class ModConnectionServer {
           type: 'response',
           requestId,
           ok: false,
-          error: known.includes(message)
-            ? message
-            : '操作に失敗しました。Bridge で状態を確認してください',
+          error:
+            error instanceof GameOperationError || known.includes(message)
+              ? message
+              : '操作に失敗しました。Bridge で状態を確認してください',
         };
       }
       c.replies.set(requestId, result);

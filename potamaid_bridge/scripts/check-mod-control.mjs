@@ -60,6 +60,14 @@ server.on('connection', (ws, req) => {
           );
           ws.send(
             JSON.stringify({
+              type: 'approval_resolved',
+              id: 'approval-test',
+              by: 'app',
+              decision: 'deny',
+            }),
+          );
+          ws.send(
+            JSON.stringify({
               type: 'consult_state',
               consult: { id: 'test', status: 'idle' },
               answer: '回答',
@@ -117,6 +125,7 @@ try {
       .map(JSON.parse);
     return (
       events.some((e) => e.type === 'notice') &&
+      events.some((e) => e.type === 'approval_resolved' && e.by === 'app') &&
       events.some((e) => e.type === 'consult_state' && e.answer === '回答')
     );
   });
@@ -134,7 +143,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 1200));
   assert.equal(creates, 1, 'unconfirmed operation must not be resent');
   console.log(
-    'Java control response, notifications, unknown result and reconnect passed',
+    'Java control response, notifications, approval sync, unknown result and reconnect passed',
   );
 } finally {
   await writeFile(path.join(directory, 'stop'), 'stop');

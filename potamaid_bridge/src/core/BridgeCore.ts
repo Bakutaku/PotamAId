@@ -35,6 +35,7 @@ import type {
 } from '../shared/ipc';
 import { findProfile, normalizeWeight } from '../shared/runConfig';
 import { ApprovalBroker } from './ApprovalBroker';
+import type { ApprovalResolver } from './ApprovalBroker';
 import { BridgeMcpServer } from './mcp/BridgeMcpServer';
 import { ModConnectionServer } from './game/ModConnectionServer';
 import { ModControl } from './game/ModControl';
@@ -89,7 +90,9 @@ export class BridgeCore implements CoreApi {
 
   private readonly store: BridgeStore;
   private readonly providers: ProviderRegistry;
-  private readonly broker = new ApprovalBroker();
+  private readonly broker = new ApprovalBroker((resolution) =>
+    this.events.emit('approvalResolved', resolution),
+  );
   private readonly mcp: BridgeMcpServer;
   private readonly game: ModConnectionServer;
   private readonly ctx: RunnerContext;
@@ -625,11 +628,33 @@ export class BridgeCore implements CoreApi {
   async respondApproval(
     approvalId: string,
     response: ApprovalResponse,
+    by: Exclude<ApprovalResolver, 'cancel'> = 'app',
   ): Promise<void> {
-    if (!this.broker.respond(approvalId, response)) {
-      throw new Error('この承認はすでに回答済みです');
+    if (!this.broker.respond(approvalId, response, by)) {
+      throw this.alreadyAnswered(this.broker.resolution(approvalId)?.by);
     }
     this.ctx.changed();
+  }
+
+  /**
+   * 解決済みの承認（対象modの範囲、ID は先頭8文字以上）に回答しようとしたときのエラー。
+   * 覚えていなければ null（ゲーム内と Bridge の画面の両方から回答できるため、先に回答した側を知らせる）
+   */
+  resolvedApprovalError(projectId: string, prefix: string): Error | null {
+    const resolution = this.broker.findResolved(projectId, prefix);
+    return resolution ? this.alreadyAnswered(resolution.by) : null;
+  }
+
+  private alreadyAnswered(first: ApprovalResolver | undefined): Error {
+    return new Error(
+      first === 'game'
+        ? 'この承認は先にゲーム内で回答済みです'
+        : first === 'app'
+          ? 'この承認は先に Bridge の画面で回答済みです'
+          : first === 'cancel'
+            ? 'この承認は中止により取り消されています'
+            : 'この承認はすでに回答済みです',
+    );
   }
 
   async cancelAll(): Promise<void> {
