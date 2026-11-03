@@ -131,6 +131,63 @@ public final class GameInformationTests {
     }
 
     @GameTest(template = "empty")
+    public static void targetBlockReportsLookedAtBlock(GameTestHelper helper) {
+        var player = helper.makeMockServerPlayerInLevel();
+        var service = new GameInformationService(helper.getLevel().getServer());
+        try {
+            var origin = helper.absolutePos(new net.minecraft.core.BlockPos(2, 2, 2));
+            var chest = helper.absolutePos(new net.minecraft.core.BlockPos(2, 2, 4));
+            helper.getLevel().setBlockAndUpdate(chest, net.minecraft.world.level.block.Blocks.CHEST.defaultBlockState()
+                    .setValue(net.minecraft.world.level.block.ChestBlock.FACING, net.minecraft.core.Direction.SOUTH));
+            // 目の高さをチェストの中心に合わせ、真南（+Z）の水平方向を向く。
+            player.setYRot(0F);
+            player.setXRot(0F);
+            player.setPos(origin.getX() + 0.5, chest.getY() + 0.5 - player.getEyeHeight(), origin.getZ() + 0.5);
+
+            var hit = service.getTargetBlockNow(player.getUUID());
+            helper.assertTrue(hit.hit() && hit.blockId().equals("minecraft:chest"), "Looked-at block is reported: " + hit);
+            helper.assertTrue(hit.position().equals(new TargetBlock.Position(chest.getX(), chest.getY(), chest.getZ())), "Absolute position is reported");
+            helper.assertTrue("south".equals(hit.state().get("facing")), "Block state is reported");
+            helper.assertTrue(hit.blockEntity() != null && hit.blockEntity().typeId().equals("minecraft:chest") && !hit.blockEntity().nbt().isEmpty(), "Block entity NBT is reported");
+            helper.assertTrue(hit.dimension().equals(helper.getLevel().dimension().location().toString()), "Dimension is reported");
+
+            player.setXRot(-90F);
+            helper.assertTrue(!service.getTargetBlockNow(player.getUUID()).hit(), "Looking at open sky reports no hit");
+        } finally {
+            remove(player);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void modEnvironmentListsLoadedMods(GameTestHelper helper) {
+        var service = new GameInformationService(helper.getLevel().getServer());
+        var environment = service.getModEnvironmentNow();
+        helper.assertTrue(environment.minecraftVersion().equals(net.minecraft.SharedConstants.getCurrentVersion().getName()), "Minecraft version is reported");
+        helper.assertTrue(!environment.neoForgeVersion().equals("unknown"), "NeoForge version is reported");
+        helper.assertTrue(environment.mods().stream().anyMatch(mod -> mod.id().equals(PotamAId.MODID)), "This mod is listed");
+        helper.assertTrue(environment.mods().stream().anyMatch(mod -> mod.id().equals("minecraft")), "Minecraft is listed");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty")
+    public static void dispatchesTargetBlockAndEnvironment(GameTestHelper helper) throws Exception {
+        var player = helper.makeMockServerPlayerInLevel();
+        var service = new GameInformationService(helper.getLevel().getServer());
+        var block = CompletableFuture.supplyAsync(() -> service.getTargetBlock(player.getUUID(), TIMEOUT)).get(2, TimeUnit.SECONDS);
+        var environment = CompletableFuture.supplyAsync(() -> service.getModEnvironment(TIMEOUT)).get(2, TimeUnit.SECONDS);
+        helper.runAfterDelay(2, () -> {
+            try {
+                helper.assertTrue(block.isDone() && !block.isCompletedExceptionally(), "Target block request completes on the server thread");
+                helper.assertTrue(environment.isDone() && !environment.isCompletedExceptionally(), "Environment request completes on the server thread");
+                helper.succeed();
+            } finally {
+                remove(player);
+            }
+        });
+    }
+
+    @GameTest(template = "empty")
     public static void commandDisplaysOnlyCaller(GameTestHelper helper) throws CommandSyntaxException {
         var server = helper.getLevel().getServer();
         var player = helper.makeMockServerPlayerInLevel();

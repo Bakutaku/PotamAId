@@ -3,8 +3,9 @@ package io.github.bakutaku.potamaid.connection;
 import com.google.gson.*;
 import com.sun.net.httpserver.*;
 import io.github.bakutaku.potamaid.PotamAId;
-import io.github.bakutaku.potamaid.game.PlayerSnapshot;
+import io.github.bakutaku.potamaid.game.GameTools;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -23,11 +24,18 @@ public final class GameMcpServer implements AutoCloseable {
         return thread;
     });
     private final String authorization;
-    private final Supplier<CompletableFuture<PlayerSnapshot>> snapshot;
+    /** 読み取り専用の引数なしツール。登録順が tools/list の順序になる。 */
+    private final Map<String, Tool> tools = new LinkedHashMap<>();
 
-    public GameMcpServer(int port, String token, Supplier<CompletableFuture<PlayerSnapshot>> snapshot) throws IOException {
+    private record Tool(String description, Supplier<CompletableFuture<?>> call) {
+    }
+
+    public GameMcpServer(int port, String token, GameTools game) throws IOException {
         this.authorization = "Bearer " + token;
-        this.snapshot = snapshot;
+        tools.put("get_player_snapshot", new Tool("起動中のシングルプレイの自分の現在地・向き・両手のアイテムを取得する。", game::playerSnapshot));
+        tools.put("get_target_block", new Tool("自分が見ているブロックの種類・座標・ブロック状態・ブロックエンティティの NBT（SNBT 文字列）を取得する。何も見ていなければ hit が false になる。", game::targetBlock));
+        tools.put("get_mod_environment", new Tool("Minecraft・NeoForge・Java のバージョンと、読み込まれている mod（ID・名前・バージョン）の一覧を取得する。", game::modEnvironment));
+        tools.put("get_game_logs", new Tool("latest.log の末尾（最大 32 KiB。超えた分は古い側を切り捨てる）を取得する。ユーザー名やパスを含みうるため、外部へ共有しないこと。", game::gameLogs));
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 16);
         server.setExecutor(executor);
         server.createContext("/mcp", this::handle);
@@ -113,24 +121,27 @@ public final class GameMcpServer implements AutoCloseable {
     }
 
     private JsonObject tools() {
-        return object("tools", GSON.toJsonTree(List.of(object("name", "get_player_snapshot",
-                "description", "起動中のシングルプレイの自分の現在地・向き・両手のアイテムを取得する。",
+        var list = new ArrayList<JsonObject>();
+        tools.forEach((name, tool) -> list.add(object("name", name, "description", tool.description(),
                 "inputSchema", object("type", "object", "properties", new JsonObject(), "additionalProperties", false),
-                "annotations", object("readOnlyHint", true, "destructiveHint", false, "idempotentHint", true, "openWorldHint", false)))));
+                "annotations", object("readOnlyHint", true, "destructiveHint", false, "idempotentHint", true, "openWorldHint", false))));
+        return object("tools", GSON.toJsonTree(list));
     }
 
     private JsonObject call(JsonObject params) {
-        if (!params.has("name") || !params.get("name").getAsString().equals("get_player_snapshot") ||
+        if (!params.has("name") || !params.get("name").isJsonPrimitive() || !tools.containsKey(params.get("name").getAsString()) ||
                 (params.has("arguments") && (!params.get("arguments").isJsonObject() || !params.getAsJsonObject("arguments").isEmpty())))
             throw new IllegalArgumentException();
         try {
-            var data = GSON.toJsonTree(snapshot.get().join());
+            var data = GSON.toJsonTree(tools.get(params.get("name").getAsString()).call().get().join());
             return object("content", GSON.toJsonTree(List.of(object("type", "text", "text", GSON.toJson(data)))), "structuredContent", data);
         } catch (RuntimeException exception) {
             Throwable cause = exception;
             while (cause.getCause() != null) cause = cause.getCause();
             String message = cause instanceof TimeoutException ? "ゲーム情報の取得がタイムアウトしました" :
-                    cause instanceof NoSuchElementException ? "プレイヤーが接続していません" : "サーバーが停止しているか、ゲーム情報を取得できません";
+                    cause instanceof NoSuchElementException ? "プレイヤーが接続していません" :
+                    cause instanceof UncheckedIOException || cause instanceof java.io.IOException ? "ログファイルを読み取れません" :
+                    "サーバーが停止しているか、ゲーム情報を取得できません";
             return object("isError", true, "content", GSON.toJsonTree(List.of(object("type", "text", "text", message))));
         }
     }

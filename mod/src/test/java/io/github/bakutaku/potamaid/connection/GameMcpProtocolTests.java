@@ -1,7 +1,8 @@
 package io.github.bakutaku.potamaid.connection;
 
 import com.google.gson.*;
-import io.github.bakutaku.potamaid.game.PlayerSnapshot;
+import io.github.bakutaku.potamaid.game.*;
+import java.util.function.Supplier;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.file.*;
@@ -21,11 +22,32 @@ public final class GameMcpProtocolTests {
         var value = new PlayerSnapshot(UUID.randomUUID(), "TestPlayer", "minecraft:overworld",
                 new PlayerSnapshot.Position(-12.25, 64, 8.5, 120, -20),
                 new PlayerSnapshot.HeldItem("minecraft:stone", 4), new PlayerSnapshot.HeldItem("minecraft:air", 0));
-        try (var server = new GameMcpServer(0, TOKEN, () -> switch (mode.get()) {
-            case 1 -> CompletableFuture.failedFuture(new NoSuchElementException("private detail"));
-            case 2 -> CompletableFuture.failedFuture(new TimeoutException("private detail"));
-            case 3 -> CompletableFuture.failedFuture(new IllegalStateException("private detail"));
-            default -> CompletableFuture.completedFuture(value);
+        var block = new TargetBlock(true, "minecraft:overworld", new TargetBlock.Position(1, 64, -3), "minecraft:chest",
+                Map.of("facing", "north"), new TargetBlock.BlockEntity("minecraft:chest", "{Items:[]}", false));
+        var environment = new ModEnvironment("1.21.1", "21.1.0", "21", List.of(new ModEnvironment.Mod("potamaid", "PotamAId", "0.1.0")));
+        var logs = new GameLogs("logs/latest.log", 12, false, "[INFO] started\n");
+        // 失敗の種類は mode で切り替える。ログの失敗は読み取りエラー（4）も使う。
+        var failures = new Supplier<CompletableFuture<Object>>() {
+            @Override public CompletableFuture<Object> get() {
+                return switch (mode.get()) {
+                    case 1 -> CompletableFuture.failedFuture(new NoSuchElementException("private detail"));
+                    case 2 -> CompletableFuture.failedFuture(new TimeoutException("private detail"));
+                    case 3 -> CompletableFuture.failedFuture(new IllegalStateException("private detail"));
+                    case 4 -> CompletableFuture.failedFuture(new java.io.UncheckedIOException(new java.io.IOException("private detail")));
+                    default -> null;
+                };
+            }
+        };
+        try (var server = new GameMcpServer(0, TOKEN, new GameTools() {
+            @SuppressWarnings("unchecked")
+            private <T> CompletableFuture<T> result(T success) {
+                var failure = failures.get();
+                return failure == null ? CompletableFuture.completedFuture(success) : (CompletableFuture<T>) failure;
+            }
+            @Override public CompletableFuture<PlayerSnapshot> playerSnapshot() { return result(value); }
+            @Override public CompletableFuture<TargetBlock> targetBlock() { return result(block); }
+            @Override public CompletableFuture<ModEnvironment> modEnvironment() { return result(environment); }
+            @Override public CompletableFuture<GameLogs> gameLogs() { return result(logs); }
         })) {
             server.start();
             uri = URI.create("http://127.0.0.1:" + server.port() + "/mcp");
@@ -60,19 +82,44 @@ public final class GameMcpProtocolTests {
                 check(new String(raw.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).startsWith("HTTP/1.1 403"), "host");
             }
             check(rpc("missing", new JsonObject()).getAsJsonObject("error").get("code").getAsInt() == -32601, "unknown method");
-            var tool = rpc("tools/list", new JsonObject()).getAsJsonObject("result").getAsJsonArray("tools").get(0).getAsJsonObject();
-            check(tool.getAsJsonObject("annotations").get("readOnlyHint").getAsBoolean(), "read only");
-            check(!tool.getAsJsonObject("inputSchema").get("additionalProperties").getAsBoolean(), "no arguments");
+            var tools = rpc("tools/list", new JsonObject()).getAsJsonObject("result").getAsJsonArray("tools");
+            var names = new ArrayList<String>();
+            for (var element : tools) {
+                var tool = element.getAsJsonObject();
+                names.add(tool.get("name").getAsString());
+                check(tool.getAsJsonObject("annotations").get("readOnlyHint").getAsBoolean(), "read only");
+                check(!tool.getAsJsonObject("inputSchema").get("additionalProperties").getAsBoolean(), "no arguments");
+            }
+            check(names.equals(List.of("get_player_snapshot", "get_target_block", "get_mod_environment", "get_game_logs")), "tool names and order");
+            check(rpc("tools/call", GameMcpServer.object("name", "unknown_tool", "arguments", new JsonObject())).has("error"), "reject unknown tool");
+            for (String name : List.of("get_target_block", "get_mod_environment", "get_game_logs")) {
+                var any = GameMcpServer.object("name", name, "arguments", GameMcpServer.object("x", 1));
+                check(rpc("tools/call", any).has("error"), "reject arguments for " + name);
+            }
+            var targetResult = rpc("tools/call", GameMcpServer.object("name", "get_target_block", "arguments", new JsonObject())).getAsJsonObject("result").getAsJsonObject("structuredContent");
+            check(targetResult.get("blockId").getAsString().equals("minecraft:chest") && targetResult.getAsJsonObject("position").get("y").getAsInt() == 64
+                    && targetResult.getAsJsonObject("state").get("facing").getAsString().equals("north")
+                    && targetResult.getAsJsonObject("blockEntity").get("nbt").getAsString().equals("{Items:[]}"), "target block structure");
+            var envResult = rpc("tools/call", GameMcpServer.object("name", "get_mod_environment", "arguments", new JsonObject())).getAsJsonObject("result").getAsJsonObject("structuredContent");
+            check(envResult.get("minecraftVersion").getAsString().equals("1.21.1") && envResult.getAsJsonArray("mods").size() == 1, "environment structure");
+            var logResult = rpc("tools/call", GameMcpServer.object("name", "get_game_logs", "arguments", new JsonObject())).getAsJsonObject("result");
+            check(logResult.getAsJsonObject("structuredContent").get("text").getAsString().equals("[INFO] started\n")
+                    && !logResult.toString().contains(System.getProperty("user.home").replace("\\", "\\\\")), "log structure without absolute path");
             var call = GameMcpServer.object("name", "get_player_snapshot", "arguments", new JsonObject());
             var snapshot = rpc("tools/call", call).getAsJsonObject("result");
             check(snapshot.getAsJsonObject("structuredContent").get("playerName").getAsString().equals("TestPlayer"), "snapshot structure");
             check(JsonParser.parseString(snapshot.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString()).equals(snapshot.get("structuredContent")), "same text and structured content");
             check(rpc("tools/call", GameMcpServer.object("name", "get_player_snapshot", "arguments", GameMcpServer.object("player", "someone"))).has("error"), "reject arguments");
-            for (int failure = 1; failure <= 3; failure++) {
-                mode.set(failure);
-                var result = rpc("tools/call", call).getAsJsonObject("result");
-                check(result.get("isError").getAsBoolean() && !result.toString().contains("private detail") && !result.has("structuredContent"), "redacted failure without stale result");
+            for (String name : names) {
+                for (int failure = 1; failure <= 4; failure++) {
+                    mode.set(failure);
+                    var result = rpc("tools/call", GameMcpServer.object("name", name, "arguments", new JsonObject())).getAsJsonObject("result");
+                    check(result.get("isError").getAsBoolean() && !result.toString().contains("private detail") && !result.has("structuredContent"), "redacted failure without stale result: " + name);
+                }
             }
+            mode.set(4);
+            check(rpc("tools/call", GameMcpServer.object("name", "get_game_logs", "arguments", new JsonObject())).toString().contains("ログファイルを読み取れません"), "log read error reason");
+            mode.set(0);
             check(post("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", Map.of()).statusCode() == 202, "notification");
             var get = CLIENT.send(HttpRequest.newBuilder(uri).header("Authorization", "Bearer " + TOKEN).GET().build(), HttpResponse.BodyHandlers.ofString());
             check(get.statusCode() == 405, "no SSE stream");
@@ -85,8 +132,34 @@ public final class GameMcpProtocolTests {
             check(Files.readString(directory.resolve("mcp.json")).equals("second"), "atomic replace");
             check(PrivateFiles.gameId(directory).equals(PrivateFiles.gameId(directory.resolve("."))), "normalized game directory");
         } finally { Files.deleteIfExists(directory.resolve("mcp.json")); Files.delete(directory); }
+        gameLogChecks();
         CLIENT.close();
-        if (checks < 25) throw new AssertionError("Missing protocol checks");
+        if (checks < 60) throw new AssertionError("Missing protocol checks");
+    }
+
+    /** latest.log の末尾の切り詰め・文字化け防止・認証情報の伏せ字を、実ファイルで確かめる。 */
+    private static void gameLogChecks() throws Exception {
+        Path directory = Files.createTempDirectory("potamaid-log-test-");
+        Path file = directory.resolve("latest.log");
+        try {
+            String secret = "Bearer " + TOKEN;
+            Files.writeString(file, "[INFO] first\nAuthorization: " + secret + "\n[ERROR] 日本語のエラー\n");
+            var small = GameLogs.readTail(file, GameLogs.MAX_BYTES);
+            check(!small.truncated() && small.text().startsWith("[INFO] first") && small.file().equals("logs/latest.log"), "small log is whole");
+            check(!small.text().contains(TOKEN) && small.text().contains("Bearer [REDACTED]"), "bearer token redacted");
+            check(!small.file().contains(directory.toString()), "absolute path not returned");
+
+            var big = new StringBuilder();
+            for (int i = 0; i < 5000; i++) big.append("[INFO] 行").append(i).append(" あいうえお\n");
+            Files.writeString(file, big.toString());
+            var tail = GameLogs.readTail(file, 4096);
+            check(tail.truncated() && tail.totalBytes() == Files.size(file), "large log is truncated");
+            check(tail.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 4096, "tail respects size limit");
+            check(tail.text().startsWith("[INFO] 行") && tail.text().endsWith("あいうえお\n") && !tail.text().contains("�"), "tail starts at a line boundary without broken characters");
+            check(tail.text().contains("行4999 "), "tail keeps newest lines");
+            try { GameLogs.readTail(directory.resolve("missing.log"), 10); throw new AssertionError("missing log"); }
+            catch (java.io.UncheckedIOException expected) { checks++; }
+        } finally { Files.deleteIfExists(file); Files.delete(directory); }
     }
 
     private static HttpResponse<String> post(String body, Map<String, String> overrides) throws Exception {

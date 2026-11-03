@@ -2,9 +2,10 @@ package io.github.bakutaku.potamaid.connection;
 
 import com.google.gson.*;
 import io.github.bakutaku.potamaid.PotamAId;
-import io.github.bakutaku.potamaid.game.GameInformationService;
+import io.github.bakutaku.potamaid.game.*;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.server.MinecraftServer;
 
 /** 統合サーバーの起動ごとに MCP を作り、停止時に破棄する。クライアント型を参照しない。 */
@@ -52,7 +53,13 @@ public final class GameConnection {
             }
             var service = new GameInformationService(server);
             var playerId = server.getSingleplayerProfile().getId();
-            var endpoint = new GameMcpServer(port, token, () -> service.getPlayer(playerId, Duration.ofSeconds(timeout)));
+            var limit = Duration.ofSeconds(timeout);
+            var endpoint = new GameMcpServer(port, token, new GameTools() {
+                @Override public CompletableFuture<PlayerSnapshot> playerSnapshot() { return service.getPlayer(playerId, limit); }
+                @Override public CompletableFuture<TargetBlock> targetBlock() { return service.getTargetBlock(playerId, limit); }
+                @Override public CompletableFuture<ModEnvironment> modEnvironment() { return service.getModEnvironment(limit); }
+                @Override public CompletableFuture<GameLogs> gameLogs() { return GameInformationService.getGameLogs(directory, limit); }
+            });
             var config = GameMcpServer.object("schemaVersion", 1, "url", "http://127.0.0.1:" + port + "/mcp",
                     "headers", GameMcpServer.object("Authorization", "Bearer " + token));
             try { PrivateFiles.write(path, config.toString()); endpoint.start(); }
