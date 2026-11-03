@@ -43,7 +43,14 @@ public final class BridgeCommands {
                 .executes(c -> { BridgeChat.line(Component.translatable("commands.potamaid.bridge.help")); return 1; })
                 .then(Commands.literal("status").executes(c -> send(object("action", "status"))))
                 .then(consult).then(pages("goals", "goals")).then(pages("approvals", "approvals"))
-                .then(Commands.literal("approval").then(Commands.argument("id", StringArgumentType.word())
+                .then(Commands.literal("approval")
+                        // ID を省くと、承認待ちが1件のときだけ回答できる。
+                        .then(decisionWithoutId("allow", "allow")).then(decisionWithoutId("always", "allowForSession")).then(decisionWithoutId("deny", "deny"))
+                        .then(Commands.literal("answer").then(Commands.argument("question", IntegerArgumentType.integer(1, 20))
+                                .then(Commands.argument("value", StringArgumentType.greedyString())
+                                        .executes(c -> send(object("action", "approval_answer", "question", IntegerArgumentType.getInteger(c, "question"),
+                                                "value", StringArgumentType.getString(c, "value")))))))
+                        .then(Commands.argument("id", StringArgumentType.word())
                         .then(decision("allow", "allow")).then(decision("always", "allowForSession")).then(decision("deny", "deny"))
                         .then(Commands.literal("answer").then(Commands.argument("question", IntegerArgumentType.integer(1, 20))
                                 .then(Commands.argument("value", StringArgumentType.greedyString())
@@ -65,6 +72,10 @@ public final class BridgeCommands {
             root.then(Commands.literal(owner).then(target));
         }
         event.getDispatcher().register(root);
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> decisionWithoutId(String literal, String decision) {
+        return Commands.literal(literal).executes(c -> send(object("action", "approval_respond", "decision", decision)));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> decision(String literal, String decision) {

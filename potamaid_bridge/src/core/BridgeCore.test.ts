@@ -1632,6 +1632,65 @@ describe('BridgeCore', () => {
     }
   });
 
+  it('ゲーム内のボタン用の操作を返し、ID を省いた回答は承認待ちが1件のときだけ受け付ける', async () => {
+    const project = await core.addProject(dir);
+    const answers: any[] = [];
+    const client = await connectGame();
+    try {
+      expect(
+        (
+          await client.request({
+            action: 'approval_respond',
+            decision: 'allow',
+          })
+        ).ok,
+      ).toBe(false);
+      for (const command of ['gradlew a', 'gradlew b']) {
+        provider.scripts.push(
+          asking({ ...EMPTY_REQUEST, kind: 'command', command }, answers),
+        );
+        await core.createConsult(project.id, command, DEFAULT_RUN);
+      }
+      await vi.waitFor(() => expect(core.snapshot().approvals).toHaveLength(2));
+      const items = (await client.request({ action: 'approvals' })).data.items;
+      expect(items[0]).toMatchObject({
+        entity: 'approval',
+        actions: ['allow', 'always', 'deny'],
+      });
+      // 複数あるときは、ID なしでは取り違えるので拒否する
+      const ambiguous = await client.request({
+        action: 'approval_respond',
+        decision: 'allow',
+      });
+      expect(ambiguous.ok).toBe(false);
+      expect(core.snapshot().approvals).toHaveLength(2);
+      await client.request({
+        action: 'approval_respond',
+        id: items[0].id,
+        decision: 'deny',
+      });
+      expect(
+        (
+          await client.request({
+            action: 'approval_respond',
+            decision: 'allow',
+          })
+        ).ok,
+      ).toBe(true);
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      expect(answers.map((r) => r.decision)).toEqual(['deny', 'allow']);
+
+      provider.scripts.push(async () => completed(planJson));
+      const goal = await core.createGoal(project.id, '目標', DEFAULT_RUN);
+      await vi.waitFor(() => expect(goalStatus(goal.id)).toBe('planReview'));
+      const goals = (await client.request({ action: 'goals' })).data.items;
+      expect(goals[0]).toMatchObject({ entity: 'goal', actions: ['approve'] });
+    } finally {
+      client.ws.close();
+      await core.cancelAll();
+    }
+  });
+
   it('ゲーム内から質問に答える。秘密の質問とフォーム・URL は許可できず、拒否だけできる', async () => {
     const project = await core.addProject(dir);
     const answers: any[] = [];

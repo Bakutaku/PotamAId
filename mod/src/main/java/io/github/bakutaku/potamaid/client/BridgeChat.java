@@ -3,7 +3,12 @@ package io.github.bakutaku.potamaid.client;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import java.util.List;
@@ -52,7 +57,11 @@ public final class BridgeChat {
                 request(io.github.bakutaku.potamaid.connection.GameMcpServer.object("action", "status"));
             }
             case "disconnected" -> line(Component.translatable("commands.potamaid.bridge.disconnected"));
-            case "notice" -> line(Component.literal(value(message, "title") + ": " + value(message, "body")));
+            case "notice" -> {
+                line(Component.literal(value(message, "title") + ": " + value(message, "body")));
+                // 承認の通知には、回答できるボタン付きの一覧を続けて出す。
+                if (value(message, "kind").equals("approval")) request(io.github.bakutaku.potamaid.connection.GameMcpServer.object("action", "approvals"));
+            }
             case "approval_resolved" -> {
                 // 自分の回答は応答で表示済み。Bridge の画面で回答・取り消されたときだけ知らせる。
                 String by = value(message, "by");
@@ -98,7 +107,51 @@ public final class BridgeChat {
         for (String field : new String[] { "summary", "latest", "result", "error" }) {
             for (String text : value(item, field).split("\n")) if (!text.isBlank()) line(Component.literal(text));
         }
+        buttons(item);
         if (value(item, "needsGameRestart").equals("true")) line(Component.translatable("commands.potamaid.bridge.restart"));
+    }
+
+    private static final java.util.regex.Pattern UUID = java.util.regex.Pattern.compile("[0-9a-fA-F-]{36}");
+
+    /**
+     * 操作ボタン。コマンドは固定の語と検証済みの ID だけから Mod が組み立て、AI の自由文を含めない。
+     * 選択肢の名前は表示にだけ使い、コマンドには番号を入れる。
+     */
+    private void buttons(JsonObject item) {
+        String id = value(item, "id");
+        String entity = value(item, "entity");
+        if (!UUID.matcher(id).matches() || !item.has("actions") || !item.get("actions").isJsonArray()) return;
+        java.util.Set<String> allowed = switch (entity) {
+            case "goal" -> java.util.Set.of("approve");
+            case "task" -> java.util.Set.of("cancel", "resume");
+            case "approval" -> java.util.Set.of("allow", "always", "deny");
+            default -> java.util.Set.of();
+        };
+        MutableComponent row = Component.literal("  ");
+        boolean any = false;
+        for (JsonElement element : item.getAsJsonArray("actions")) {
+            String action = element.isJsonPrimitive() ? element.getAsString() : "";
+            if (!allowed.contains(action)) continue;
+            row.append(button(Component.translatable("commands.potamaid.bridge.action." + action), "/potamaid " + entity + " " + id + " " + action));
+            any = true;
+        }
+        if (entity.equals("approval") && item.has("answers") && item.get("answers").isJsonArray()) {
+            int number = 1;
+            for (JsonElement element : item.getAsJsonArray("answers")) {
+                row.append(button(Component.literal(number + ") " + (element.isJsonPrimitive() ? element.getAsString() : "")),
+                        "/potamaid approval " + id + " answer 1 " + number));
+                any = true;
+                number++;
+            }
+        }
+        if (any) Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.getChat().addMessage(row));
+    }
+
+    private static Component button(Component label, String command) {
+        Style style = Style.EMPTY.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(command)));
+        return Component.literal("[").append(label).append("] ").withStyle(style);
     }
 
     static String value(JsonObject object, String name) {

@@ -26,14 +26,14 @@ const actionSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('approval_respond'),
-      id,
+      id: id.optional(),
       decision: z.enum(['allow', 'allowForSession', 'deny']),
     })
     .strict(),
   z
     .object({
       action: z.literal('approval_answer'),
-      id,
+      id: id.optional(),
       question: z.number().int().min(1).max(20),
       value: z.string().trim().min(1).max(500),
     })
@@ -75,6 +75,9 @@ const consultView = (c: Consult) => ({
 });
 const goalView = (g: Goal) => ({
   id: g.id,
+  entity: 'goal',
+  // ゲームがクリックできるボタンにする操作（固定の語だけ。コマンドは Mod が組み立てる）
+  actions: g.status === 'planReview' ? ['approve'] : [],
   title: clip(g.title, 120),
   status: g.status,
   summary: clip(g.planSummary, 1000),
@@ -82,6 +85,12 @@ const goalView = (g: Goal) => ({
 });
 const taskView = (t: Task) => ({
   id: t.id,
+  entity: 'task',
+  actions: t.paused
+    ? ['resume']
+    : t.status === 'running' || t.status === 'approval'
+      ? ['cancel']
+      : [],
   number: t.number,
   title: clip(t.title, 120),
   status: t.status,
@@ -131,6 +140,17 @@ const approvalLines = (a: Approval): string[] => {
     );
   else lines.push(`/potamaid approval ${id} deny（回答は Bridge で行います）`);
   return lines;
+};
+/** クリックできるボタンにする回答。質問は、秘密でなく選択肢が1問だけのときに選択肢ごとのボタンも出す */
+const approvalButtons = (a: Approval) => {
+  if (a.kind === 'command' || a.kind === 'fileChange')
+    return { actions: ['allow', 'always', 'deny'], answers: [] };
+  const single = a.questions.length === 1 ? a.questions[0] : null;
+  const choices =
+    single && !single.secret && a.kind === 'question'
+      ? single.options.slice(0, 8).map((o) => clip(o.label, 40))
+      : [];
+  return { actions: ['deny'], answers: choices };
 };
 const paged = <T>(items: T[], page: number) => ({
   items: items.slice((page - 1) * 5, page * 5),
@@ -209,7 +229,20 @@ export class ModControl {
   }
 
   /** 承認待ちを探す。見つからなくても、回答済みの承認なら先に回答した側を知らせる */
-  private pendingApproval(approvals: Approval[], prefix: string): Approval {
+  private pendingApproval(
+    approvals: Approval[],
+    prefix: string | undefined,
+  ): Approval {
+    if (prefix === undefined) {
+      // ID を省いた回答は、取り違えないよう承認待ちが1件のときだけ受け付ける
+      if (approvals.length === 0)
+        throw new GameOperationError('承認待ちはありません');
+      if (approvals.length > 1)
+        throw new GameOperationError(
+          '承認待ちが複数あります。/potamaid approvals のボタンか ID で指定してください',
+        );
+      return approvals[0];
+    }
     try {
       return this.resolve(approvals, prefix);
     } catch (error) {
@@ -343,6 +376,8 @@ export class ModControl {
           ...paged(
             s.approvals.map((approval) => ({
               id: approval.id,
+              entity: 'approval',
+              ...approvalButtons(approval),
               title: clip(this.ownerTitle(approval.owner, s), 120),
               status: 'approval',
               summary: clip(approvalLines(approval).join('\n'), 1200),
