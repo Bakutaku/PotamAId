@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -29,8 +30,8 @@ import net.neoforged.fml.ModList;
 public final class GameInformationService {
     /** ブロックエンティティの NBT の最大文字数。チェストなど大きいものを丸ごと AI に渡さない。 */
     private static final int MAX_NBT_CHARS = 16 * 1024;
-    private static final ExecutorService LOG_READER = Executors.newSingleThreadExecutor(runnable -> {
-        var thread = new Thread(runnable, "PotamAId game log reader");
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(runnable -> {
+        var thread = new Thread(runnable, "PotamAId game worker");
         thread.setDaemon(true);
         return thread;
     });
@@ -51,7 +52,11 @@ public final class GameInformationService {
     /** プレイヤーの視線の先のブロック。サーバーが持つ位置・向きから判定するため、クライアントへの問い合わせは不要。 */
     public CompletableFuture<TargetBlock> getTargetBlock(UUID playerId, Duration timeout) {
         Objects.requireNonNull(playerId);
-        return onServerThread(timeout, () -> getTargetBlockNow(playerId));
+        // 巨大な NBT の文字列化でサーバースレッドを占有しないよう、ゲームの状態を読む部分だけをサーバースレッドで行う。
+        // NBT は読み取り時点の独立したコピーなので、文字列化は別スレッドで行ってよい。
+        return onServerThread(timeout, () -> captureTargetBlock(playerId))
+                .thenApplyAsync(CapturedTarget::finish, WORKER)
+                .orTimeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
     }
 
     public CompletableFuture<ModEnvironment> getModEnvironment(Duration timeout) {
@@ -67,7 +72,7 @@ public final class GameInformationService {
         checkTimeout(timeout);
         return CompletableFuture.supplyAsync(
                         () -> GameLogs.readTail(gameDirectory.resolve("logs").resolve("latest.log"), GameLogs.MAX_BYTES),
-                        LOG_READER)
+                        WORKER)
                 .orTimeout(timeout.toNanos(), TimeUnit.NANOSECONDS);
     }
 
@@ -114,11 +119,29 @@ public final class GameInformationService {
                 snapshot(player.getOffhandItem()));
     }
 
+    /** サーバースレッド上の呼び出し元用。NBT の文字列化もこのスレッドで行う。 */
     public TargetBlock getTargetBlockNow(UUID playerId) {
+        return captureTargetBlock(playerId).finish();
+    }
+
+    /** サーバースレッドで読んだ値。NBT は独立したコピーで、文字列化は後から別スレッドでもできる。 */
+    private record CapturedTarget(TargetBlock block, String blockEntityType, CompoundTag nbt) {
+        TargetBlock finish() {
+            if (nbt == null) {
+                return block;
+            }
+            String text = nbt.toString();
+            boolean truncated = text.length() > MAX_NBT_CHARS;
+            return new TargetBlock(block.hit(), block.dimension(), block.position(), block.blockId(), block.state(),
+                    new TargetBlock.BlockEntity(blockEntityType, truncated ? text.substring(0, MAX_NBT_CHARS) : text, truncated));
+        }
+    }
+
+    private CapturedTarget captureTargetBlock(UUID playerId) {
         var player = playerNow(playerId);
         var hit = player.pick(player.blockInteractionRange(), 1.0F, false);
         if (!(hit instanceof BlockHitResult blockHit) || hit.getType() != HitResult.Type.BLOCK) {
-            return TargetBlock.none();
+            return new CapturedTarget(TargetBlock.none(), null, null);
         }
         var level = player.serverLevel();
         var pos = blockHit.getBlockPos();
@@ -127,18 +150,15 @@ public final class GameInformationService {
         for (var property : state.getProperties()) {
             properties.put(property.getName(), valueName(state, property));
         }
-        TargetBlock.BlockEntity blockEntity = null;
-        var entity = level.getBlockEntity(pos);
-        if (entity != null) {
-            String nbt = entity.saveWithFullMetadata(server.registryAccess()).toString();
-            boolean truncated = nbt.length() > MAX_NBT_CHARS;
-            blockEntity = new TargetBlock.BlockEntity(
-                    BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(),
-                    truncated ? nbt.substring(0, MAX_NBT_CHARS) : nbt, truncated);
-        }
-        return new TargetBlock(true, level.dimension().location().toString(),
+        var block = new TargetBlock(true, level.dimension().location().toString(),
                 new TargetBlock.Position(pos.getX(), pos.getY(), pos.getZ()),
-                BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), properties, blockEntity);
+                BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), properties, null);
+        var entity = level.getBlockEntity(pos);
+        if (entity == null) {
+            return new CapturedTarget(block, null, null);
+        }
+        return new CapturedTarget(block, BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(),
+                entity.saveWithFullMetadata(server.registryAccess()));
     }
 
     public ModEnvironment getModEnvironmentNow() {

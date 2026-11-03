@@ -157,6 +157,16 @@ public final class GameMcpProtocolTests {
             check(tail.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 4096, "tail respects size limit");
             check(tail.text().startsWith("[INFO] 行") && tail.text().endsWith("あいうえお\n") && !tail.text().contains("�"), "tail starts at a line boundary without broken characters");
             check(tail.text().contains("行4999 "), "tail keeps newest lines");
+            // 読み始めがちょうど行頭なら、先頭の行を捨てない。
+            Files.writeString(file, "old\nnew\n");
+            var boundary = GameLogs.readTail(file, 4);
+            check(boundary.truncated() && boundary.text().equals("new\n"), "line boundary keeps first line");
+            var middle = GameLogs.readTail(file, 5);
+            check(middle.truncated() && middle.text().equals("new\n"), "mid-line start drops partial line");
+            // タブ区切り・短いトークンも伏せる。
+            Files.writeString(file, "Authorization: Bearer\tabc123\nauthorization: bearer   short-token_1.2\n");
+            var tabbed = GameLogs.readTail(file, GameLogs.MAX_BYTES);
+            check(!tabbed.text().contains("abc123") && !tabbed.text().contains("short-token") && tabbed.text().contains("Bearer [REDACTED]"), "tab and short tokens redacted");
             try { GameLogs.readTail(directory.resolve("missing.log"), 10); throw new AssertionError("missing log"); }
             catch (java.io.UncheckedIOException expected) { checks++; }
         } finally { Files.deleteIfExists(file); Files.delete(directory); }
