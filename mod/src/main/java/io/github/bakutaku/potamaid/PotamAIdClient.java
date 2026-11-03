@@ -31,6 +31,8 @@ public class PotamAIdClient {
 
     public static BridgeChat bridgeChat() { return bridgeChat; }
 
+    public static GameConnection game() { return game; }
+
     public PotamAIdClient(ModContainer container, IEventBus bus) {
         // Allows NeoForge to create a config screen for this mod's configs.
         // The config screen is accessed by going to the Mods screen > clicking on your mod > clicking on config.

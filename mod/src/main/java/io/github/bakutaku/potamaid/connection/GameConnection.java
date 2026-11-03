@@ -25,6 +25,10 @@ public final class GameConnection {
 
     public JsonObject state() { return state.deepCopy(); }
 
+    public boolean enabled() { return enabled; }
+
+    public int port() { return port; }
+
     public synchronized void start(MinecraftServer server) {
         if (server.isDedicatedServer()) return;
         stop();

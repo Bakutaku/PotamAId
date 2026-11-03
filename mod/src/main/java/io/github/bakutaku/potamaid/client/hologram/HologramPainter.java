@@ -23,7 +23,7 @@ import org.joml.Matrix4f;
 @OnlyIn(Dist.CLIENT)
 public final class HologramPainter {
     /** 枠の 9 スライス（16 × 16 のセルを 3 × 3）。 */
-    private static final ResourceLocation PANEL = ResourceLocation.fromNamespaceAndPath(PotamAId.MODID, "textures/hologram/panel.png");
+    public static final ResourceLocation PANEL = ResourceLocation.fromNamespaceAndPath(PotamAId.MODID, "textures/hologram/panel.png");
     private static final ResourceLocation ICONS = ResourceLocation.fromNamespaceAndPath(PotamAId.MODID, "textures/hologram/icons.png");
     private static final int CELL = 16;
 
@@ -48,7 +48,12 @@ public final class HologramPainter {
 
     /** 9 スライスの枠。角はそのまま、辺と中央は 16 単位ずつ繰り返して、大きさによらず同じ密度で描く。argb は色の掛け合わせ。 */
     public static void frame(PoseStack pose, MultiBufferSource buffer, float width, float height, float z, int argb) {
-        VertexConsumer out = buffer.getBuffer(RenderType.text(PANEL));
+        frame(pose, buffer, PANEL, width, height, z, argb);
+    }
+
+    /** 別の 9 スライスのテクスチャ（48 × 48）で描く枠。 */
+    public static void frame(PoseStack pose, MultiBufferSource buffer, ResourceLocation texture, float width, float height, float z, int argb) {
+        VertexConsumer out = buffer.getBuffer(RenderType.text(texture));
         Matrix4f m = pose.last().pose();
         for (float y = 0; y < height; ) {
             int row = y < CELL ? 0 : y >= height - CELL ? 2 : 1;

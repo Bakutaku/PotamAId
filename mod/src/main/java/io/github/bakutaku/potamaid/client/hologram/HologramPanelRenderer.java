@@ -13,6 +13,7 @@ import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.phys.AABB;
@@ -84,6 +85,9 @@ public abstract class HologramPanelRenderer implements BlockEntityRenderer<Holog
     /** 中身を描く。枠と走査線は描き終わっている。奥のものから順に描くこと。 */
     protected abstract void content(Panel panel, State state, Look look);
 
+    /** 枠の 9 スライスのテクスチャ。 */
+    protected ResourceLocation frameTexture() { return HologramPainter.PANEL; }
+
     @Override
     public int getViewDistance() { return HologramRenderers.VIEW_DISTANCE; }
 
@@ -144,7 +148,7 @@ public abstract class HologramPanelRenderer implements BlockEntityRenderer<Holog
     }
 
     private void drawFrame(Panel panel, Look look) {
-        HologramPainter.frame(panel.pose(), panel.buffer(), panel.width(), panel.height(), -1f,
+        HologramPainter.frame(panel.pose(), panel.buffer(), frameTexture(), panel.width(), panel.height(), -1f,
                 HologramPainter.argb((int) (255 * look.alpha()), HologramPainter.mix(look.tint(), 0xFFFFFF, look.flash())));
         // 流れる明るい帯（上から下へ繰り返す）
         var quads = HologramPainter.quads(panel.buffer());

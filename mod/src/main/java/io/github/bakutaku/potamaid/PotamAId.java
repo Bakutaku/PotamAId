@@ -3,6 +3,7 @@ package io.github.bakutaku.potamaid;
 import org.slf4j.Logger;
 
 import io.github.bakutaku.potamaid.block.ConsultDeskBlock;
+import io.github.bakutaku.potamaid.block.DebugDisplayBlock;
 import io.github.bakutaku.potamaid.block.HologramBlockEntity;
 import io.github.bakutaku.potamaid.block.NoticeLampBlock;
 import io.github.bakutaku.potamaid.block.ProgressBoardBlock;
@@ -18,6 +19,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Rarity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -71,10 +73,17 @@ public class PotamAId {
     public static final DeferredBlock<NoticeLampBlock> NOTICE_LAMP = BLOCKS.registerBlock("notice_lamp", NoticeLampBlock::new,
             BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_ORANGE).strength(2.0f).sound(SoundType.METAL).noOcclusion());
     public static final DeferredItem<BlockItem> NOTICE_LAMP_ITEM = ITEMS.registerSimpleBlockItem("notice_lamp", NOTICE_LAMP);
+    // 開発用の情報ディスプレイ。レシピもクリエイティブタブもなく、/give potamaid:debug_display でだけ手に入る。
+    public static final DeferredBlock<DebugDisplayBlock> DEBUG_DISPLAY = BLOCKS.registerBlock("debug_display", DebugDisplayBlock::new,
+            BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_PURPLE).strength(2.0f).sound(SoundType.METAL).lightLevel(state -> 6).noOcclusion());
+    public static final DeferredItem<BlockItem> DEBUG_DISPLAY_ITEM = ITEMS.registerSimpleBlockItem("debug_display", DEBUG_DISPLAY,
+            new Item.Properties().rarity(Rarity.EPIC));
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HologramBlockEntity>> PROGRESS_BOARD_ENTITY = BLOCK_ENTITY_TYPES.register("progress_board",
             () -> BlockEntityType.Builder.of((pos, state) -> new HologramBlockEntity(PotamAId.PROGRESS_BOARD_ENTITY.get(), pos, state), PROGRESS_BOARD.get()).build(null));
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HologramBlockEntity>> NOTICE_LAMP_ENTITY = BLOCK_ENTITY_TYPES.register("notice_lamp",
             () -> BlockEntityType.Builder.of((pos, state) -> new HologramBlockEntity(PotamAId.NOTICE_LAMP_ENTITY.get(), pos, state), NOTICE_LAMP.get()).build(null));
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HologramBlockEntity>> DEBUG_DISPLAY_ENTITY = BLOCK_ENTITY_TYPES.register("debug_display",
+            () -> BlockEntityType.Builder.of((pos, state) -> new HologramBlockEntity(PotamAId.DEBUG_DISPLAY_ENTITY.get(), pos, state), DEBUG_DISPLAY.get()).build(null));
 
     // Creates a new food item with the id "potamaid:example_id", nutrition 1 and saturation 2
     public static final DeferredItem<Item> EXAMPLE_ITEM = ITEMS.registerSimpleItem("example_item", new Item.Properties().food(new FoodProperties.Builder()

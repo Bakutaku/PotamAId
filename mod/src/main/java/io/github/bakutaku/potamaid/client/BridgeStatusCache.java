@@ -30,6 +30,9 @@ public final class BridgeStatusCache {
     public record State(boolean enabled, boolean connected, String project, int approvals, int unread,
             List<Entry> entries, long countsChangedAt) {}
 
+    /** 情報ディスプレイ用の全体の件数と、それを取得した時刻（Util.getMillis()。未取得なら 0）。 */
+    public record Summary(int goals, int tasks, int consults, long refreshedAt) {}
+
     /** 表示されている間の取得間隔（ティック）。 */
     private static final int REFRESH_TICKS = 200;
     /** 表示が途絶えたらこの時間（ミリ秒）を過ぎて取得をやめる。 */
@@ -44,6 +47,7 @@ public final class BridgeStatusCache {
 
     private final Set<String> unreadConsults = new HashSet<>();
     private volatile State state = new State(false, false, "", 0, 0, List.of(), 0);
+    private volatile Summary summary = new Summary(0, 0, 0, 0);
     private volatile long touchedAt;
     private volatile boolean refreshing;
     private BridgeChat attached;
@@ -53,6 +57,8 @@ public final class BridgeStatusCache {
     private BridgeStatusCache() {}
 
     public State state() { return state; }
+
+    public Summary summary() { return summary; }
 
     /** 描画側が呼ぶ。呼ばれている間だけ定期取得する。 */
     public void touch() { touchedAt = Util.getMillis(); }
@@ -118,6 +124,8 @@ public final class BridgeStatusCache {
             JsonObject data = status.getAsJsonObject("data");
             String project = BridgeChat.value(data, "name");
             int approvals = parseInt(BridgeChat.value(data, "approvals"));
+            summary = new Summary(parseInt(BridgeChat.value(data, "goals")), parseInt(BridgeChat.value(data, "tasks")),
+                    parseInt(BridgeChat.value(data, "consults")), Util.getMillis());
             update(s -> withCounts(new State(s.enabled(), true, project, s.approvals(), s.unread(), s.entries(), s.countsChangedAt()),
                     approvals, s.unread()));
             return goals(chat, 1, new ArrayList<>());
