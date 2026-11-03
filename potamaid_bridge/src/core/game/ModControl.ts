@@ -385,9 +385,10 @@ export class ModControl {
         let answer = a.value;
         if (question.options.length > 0 && /^\d+$/.test(a.value)) {
           const option = question.options[Number(a.value) - 1];
-          if (!option)
+          if (option) answer = option.label;
+          // 自由な回答が許される質問では、範囲外の数字（ポート番号など）をそのまま回答にする
+          else if (!question.allowOther)
             throw new GameOperationError('選択肢の番号が正しくありません');
-          answer = option.label;
         } else if (!question.allowOther) {
           throw new GameOperationError(
             'この質問は選択肢の番号で答えてください',

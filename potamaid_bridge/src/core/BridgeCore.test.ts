@@ -1709,6 +1709,59 @@ describe('BridgeCore', () => {
         answers: { q1: ['炉'], q2: ['ポタム'] },
       });
 
+      // 自由な回答も許す質問では、範囲内の数字は選択肢、範囲外の数字は自由な回答になる
+      for (const [value, expected] of [
+        ['2', '炉'],
+        ['8080', '8080'],
+      ]) {
+        provider.scripts.push(
+          asking(
+            {
+              ...EMPTY_REQUEST,
+              kind: 'question',
+              questions: [
+                {
+                  id: 'q1',
+                  header: 'ポート',
+                  question: 'どのポートですか？',
+                  options: [
+                    { label: '粉砕機', description: '' },
+                    { label: '炉', description: '' },
+                  ],
+                  allowOther: true,
+                  secret: false,
+                },
+              ],
+            },
+            answers,
+          ),
+        );
+        await core.createConsult(project.id, `自由回答 ${value}`, DEFAULT_RUN);
+        await vi.waitFor(() =>
+          expect(core.snapshot().approvals).toHaveLength(1),
+        );
+        expect(
+          (
+            await client.request({
+              action: 'approval_answer',
+              id: core.snapshot().approvals[0].id,
+              question: 1,
+              value,
+            })
+          ).data.kind,
+        ).toBe('accepted');
+        await vi.waitFor(() =>
+          expect(answers.at(-1)).toEqual({
+            decision: 'allow',
+            answers: { q1: [expected] },
+          }),
+        );
+        await vi.waitFor(() =>
+          expect(core.snapshot().approvals).toHaveLength(0),
+        );
+      }
+      answers.length = 1;
+
       // 秘密の質問は、ゲーム内の入力を受け付けない
       provider.scripts.push(
         asking(
